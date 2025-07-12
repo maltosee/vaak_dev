@@ -16,28 +16,21 @@ class AudioHandler {
 	/**
      * Fetch VAD configuration from server
      */
+/**
+ * Get VAD configuration (local constants, no server fetch needed)
+ */
 async fetchVADConfig() {
-	try {
-		const response = await fetch('http://127.0.0.1:8080/vad-config');
-		if (!response.ok) {
-			throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-		}
-		const config = await response.json();
-		console.log('📋 VAD config loaded:', config);
-		return config;
-	} catch (error) {
-		console.warn('⚠️ Failed to load VAD config, using defaults:', error);
-		return {
-			executionProvider: 'cpu',
-			model: 'silero_vad_legacy.onnx',
-			positiveSpeechThreshold: 0.5,
-			negativeSpeechThreshold: 0.35,
-			redemptionFrames: 20,
-			frameSamples: 1536,
-			preSpeechPadFrames: 5,
-			minSpeechFrames: 10
-		};
-	}
+    console.log('📋 Using local VAD config');
+    return {
+        executionProvider: 'cpu',
+        model: 'silero_vad_legacy.onnx',
+        positiveSpeechThreshold: 0.5,
+        negativeSpeechThreshold: 0.35,
+        redemptionFrames: 20,
+        frameSamples: 1536,
+        preSpeechPadFrames: 5,
+        minSpeechFrames: 10
+    };
 }
 
 
