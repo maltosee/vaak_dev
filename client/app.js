@@ -150,7 +150,20 @@ class SanskritTutorApp {
                 };
 
                 this.ws.onmessage = (event) => {
-                    this.handleWebSocketMessage(event);
+                    // Handle binary audio data (ArrayBuffer from backend)
+                    if (event.data instanceof ArrayBuffer) {
+                        console.log('🔊 Received audio response');
+                        this.audioHandler.playAudioResponse(event.data, 'mp3');
+                        return;
+                    }
+                    
+                    // Handle JSON text messages
+                    try {
+                        const data = JSON.parse(event.data);
+                        this.handleWebSocketMessage(data);
+                    } catch (error) {
+                        console.error('❌ Error parsing JSON:', error);
+                    }
                 };
 
                 this.ws.onclose = (event) => {
@@ -183,39 +196,30 @@ class SanskritTutorApp {
 
     /**
      * Handle incoming WebSocket messages
-     * @param {MessageEvent} event - WebSocket message event
+     * @param {Object} data - Parsed JSON message
      */
-    handleWebSocketMessage(event) {
+    handleWebSocketMessage(data) {
         try {
-            // Handle binary audio data
-            if (event.data instanceof ArrayBuffer) {
-                console.log('🔊 Received audio response');
-                this.audioHandler.playAudioResponse(event.data, 'mp3');
-                return;
-            }
+            console.log('📨 Received message:', data.type);
 
-            // Handle text messages
-            const message = JSON.parse(event.data);
-            console.log('📨 Received message:', message.type);
-
-            switch (message.type) {
+            switch (data.type) {
                 case 'connected':
-                    this.addMessage('system', 'Connected to Sanskrit Tutor', message.message);
-                    this.updateDebugInfo('Connected', message);
+                    this.addMessage('system', 'Connected to Sanskrit Tutor', data.message);
+                    this.updateDebugInfo('Connected', data);
                     break;
 
                 case 'llm_response':
-                    this.addMessage('ai', 'Sanskrit Tutor', message.text, {
-                        transcription: message.transcription,
-                        language: message.language,
-                        processingTime: message.processingTime
+                    this.addMessage('ai', 'Sanskrit Tutor', data.text, {
+                        transcription: data.transcription,
+                        language: data.language,
+                        processingTime: data.processingTime
                     });
-                    this.updateDebugInfo('AI Response', message);
+                    this.updateDebugInfo('AI Response', data);
                     break;
 
                 case 'error':
-                    this.showError(message.message);
-                    this.updateDebugInfo('Error', message);
+                    this.showError(data.message);
+                    this.updateDebugInfo('Error', data);
                     this.setVoiceStatus('listening'); // Resume listening after error
                     break;
 
@@ -224,8 +228,8 @@ class SanskritTutorApp {
                     break;
 
                 default:
-                    console.log('❓ Unknown message type:', message.type);
-                    this.updateDebugInfo('Unknown Message', message);
+                    console.log('❓ Unknown message type:', data.type);
+                    this.updateDebugInfo('Unknown Message', data);
             }
 
         } catch (error) {
