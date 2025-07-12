@@ -1,4 +1,3 @@
-
 // Audio handling with @ricky0123/vad-web
 class AudioHandler {
     constructor() {
@@ -13,26 +12,30 @@ class AudioHandler {
         console.log('🎵 AudioHandler initialized');
     }
 	
-	/**
+    /**
      * Fetch VAD configuration from server
      */
-/**
- * Get VAD configuration (local constants, no server fetch needed)
- */
-async fetchVADConfig() {
-    console.log('📋 Using local VAD config');
-    return {
-        executionProvider: 'cpu',
-        model: 'silero_vad_legacy.onnx',
-        positiveSpeechThreshold: 0.5,
-        negativeSpeechThreshold: 0.35,
-        redemptionFrames: 20,
-        frameSamples: 1536,
-        preSpeechPadFrames: 5,
-        minSpeechFrames: 10
-    };
-}
-
+    async fetchVADConfig() {
+        try {
+            console.log('📋 Fetching VAD config from server');
+            const response = await fetch(`${CONFIG.getBaseURL()}/vad-config`);
+            const config = await response.json();
+            console.log('✅ VAD config loaded from server');
+            return config;
+        } catch (error) {
+            console.error('❌ Failed to fetch VAD config, using defaults:', error);
+            return {
+                executionProvider: 'cpu',
+                model: 'silero_vad_legacy.onnx',
+                positiveSpeechThreshold: 0.8,
+                negativeSpeechThreshold: 0.6,
+                redemptionFrames: 20,
+                frameSamples: 1536,
+                preSpeechPadFrames: 5,
+                minSpeechFrames: 15
+            };
+        }
+    }
 
     /**
      * Initialize VAD with callbacks
