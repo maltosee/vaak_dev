@@ -84,6 +84,20 @@ const wss = new WebSocket.Server({
   }
 });
 
+// VAD configuration endpoint
+app.get('/vad-config', (req, res) => {
+  res.json({
+    executionProvider: process.env.VAD_EXECUTION_PROVIDER || 'cpu',
+    model: process.env.VAD_MODEL || 'silero_vad_legacy.onnx',
+    positiveSpeechThreshold: parseFloat(process.env.VAD_POSITIVE_SPEECH_THRESHOLD) || 0.5,
+    negativeSpeechThreshold: parseFloat(process.env.VAD_NEGATIVE_SPEECH_THRESHOLD) || 0.35,
+    redemptionFrames: parseInt(process.env.VAD_REDEMPTION_FRAMES) || 20,
+    frameSamples: parseInt(process.env.VAD_FRAME_SAMPLES) || 1536,
+    preSpeechPadFrames: parseInt(process.env.VAD_PRE_SPEECH_PAD_FRAMES) || 5,
+    minSpeechFrames: parseInt(process.env.VAD_MIN_SPEECH_FRAMES) || 10
+  });
+});
+
 // WebSocket connection handler
 wss.on('connection', (ws, req) => {
   let userId = null;
@@ -223,7 +237,7 @@ process.on('SIGTERM', () => {
 
 // Start server
 const PORT = config.server.port;
-server.listen(PORT, () => {
+server.listen(PORT, '0.0.0.0',() => {
   console.log('🚀 Sanskrit Tutor Backend Started!');
   console.log(`📡 Server: http://localhost:${PORT}`);
   console.log(`🔌 WebSocket: ws://localhost:${PORT}?token=your_token`);
