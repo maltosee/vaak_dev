@@ -110,7 +110,8 @@ class SanskritTutorApp {
      */
     async authenticate(name, apiKey) {
         try {
-            const response = await fetch('http://localhost:8080/auth', {
+            const response = await fetch(`${CONFIG.getBaseURL()}/auth`, {
+
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
@@ -139,7 +140,7 @@ class SanskritTutorApp {
     async connectWebSocket() {
         return new Promise((resolve, reject) => {
             try {
-                const wsUrl = `ws://localhost:8080?token=${this.token}`;
+                const wsUrl = `${CONFIG.getWebSocketURL()}?token=${this.token}`;
                 this.ws = new WebSocket(wsUrl);
 
                 this.ws.onopen = () => {

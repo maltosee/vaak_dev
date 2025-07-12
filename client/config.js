@@ -4,6 +4,11 @@ const CONFIG = {
     production: 'wss://sanskrit-tutor-backend.fly.dev'
   },
   
+  BASE_URL: {
+    development: 'http://localhost:8080',
+    production: 'https://sanskrit-tutor-backend.fly.dev'
+  },
+  
   getEnvironment() {
     return window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' 
       ? 'development' 
@@ -13,5 +18,10 @@ const CONFIG = {
   getWebSocketURL() {
     const env = this.getEnvironment();
     return this.WEBSOCKET_URL[env];
+  },
+  
+  getBaseURL() {
+    const env = this.getEnvironment();
+    return this.BASE_URL[env];
   }
 };
