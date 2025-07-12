@@ -17,7 +17,19 @@ const config = {
   // OpenAI Configuration
   openai: {
     apiKey: process.env.OPENAI_API_KEY,
-    model: process.env.OPENAI_MODEL || 'gpt-3.5-turbo'
+    model: process.env.OPENAI_MODEL || 'gpt-3.5-turbo',
+    baseUrl: process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1',
+    
+    // Whisper STT Configuration
+    whisper: {
+      model: process.env.WHISPER_MODEL || 'whisper-1',
+      language: process.env.WHISPER_LANGUAGE || null, // null = auto-detect
+      timeout: parseInt(process.env.WHISPER_TIMEOUT) || 30000,
+      maxFileSize: parseInt(process.env.WHISPER_MAX_SIZE) || (25 * 1024 * 1024), // 25MB
+      preferredLanguages: (process.env.WHISPER_PREFERRED_LANGS || 'en,hi,sa').split(','),
+      responseFormat: process.env.WHISPER_RESPONSE_FORMAT || 'json',
+      temperature: parseFloat(process.env.WHISPER_TEMPERATURE) || 0
+    }
   },
 
   // AWS Polly Configuration
@@ -27,6 +39,21 @@ const config = {
     region: process.env.AWS_REGION || 'us-east-1',
     pollyVoiceId: process.env.AWS_POLLY_VOICE_ID || 'Aditi',
     pollyLanguageCode: process.env.AWS_POLLY_LANGUAGE_CODE || 'hi-IN'
+  },
+
+  // VAD Configuration
+  vad: {
+    minSilenceDuration: parseInt(process.env.VAD_MIN_SILENCE_DURATION) || 2000,
+    minActivationThreshold: parseFloat(process.env.VAD_MIN_ACTIVATION_THRESHOLD) || 0.3,
+    maxActivationThreshold: parseFloat(process.env.VAD_MAX_ACTIVATION_THRESHOLD) || 0.8,
+    executionProvider: process.env.VAD_EXECUTION_PROVIDER || 'cpu',
+    model: process.env.VAD_MODEL || 'silero_vad_legacy.onnx',
+    positiveSpeechThreshold: parseFloat(process.env.VAD_POSITIVE_SPEECH_THRESHOLD) || 0.5,
+    negativeSpeechThreshold: parseFloat(process.env.VAD_NEGATIVE_SPEECH_THRESHOLD) || 0.35,
+    redemptionFrames: parseInt(process.env.VAD_REDEMPTION_FRAMES) || 20,
+    frameSamples: parseInt(process.env.VAD_FRAME_SAMPLES) || 1536,
+    preSpeechPadFrames: parseInt(process.env.VAD_PRE_SPEECH_PAD_FRAMES) || 5,
+    minSpeechFrames: parseInt(process.env.VAD_MIN_SPEECH_FRAMES) || 10
   },
 
   // Session Configuration

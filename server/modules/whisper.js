@@ -8,13 +8,16 @@ const config = require('../utils/config');
 class WhisperSTT {
   constructor() {
     this.apiKey = config.openai.apiKey;
-    this.apiUrl = 'https://api.openai.com/v1/audio/transcriptions';
+    this.apiUrl = `${config.openai.baseUrl}/audio/transcriptions`;
+    this.whisperConfig = config.openai.whisper;
     
     if (!this.apiKey) {
       throw new Error('OpenAI API key not configured');
     }
     
     console.log('✅ Whisper STT initialized');
+    console.log(`🔧 Using model: ${this.whisperConfig.model}`);
+    console.log(`🌍 Language: ${this.whisperConfig.language || 'auto-detect'}`);
   }
 
   /**
@@ -27,21 +30,34 @@ class WhisperSTT {
     try {
       const startTime = Date.now();
       
+      // Validate audio buffer
+      const validation = this.validateAudioBuffer(audioBuffer);
+      if (!validation.valid) {
+        throw new Error(validation.error);
+      }
+      
       // Create temporary file for Whisper API
       const tempFilePath = await this.saveBufferToTempFile(audioBuffer, options.format || 'webm');
       
       const formData = new FormData();
       formData.append('file', fs.createReadStream(tempFilePath));
-      formData.append('model', options.model || 'whisper-1');
-      formData.append('language', options.language || 'auto'); // auto-detect or specify language
-      formData.append('response_format', options.responseFormat || 'json');
+      formData.append('model', options.model || this.whisperConfig.model);
+      formData.append('response_format', options.responseFormat || this.whisperConfig.responseFormat);
+      
+      // Only append language if explicitly provided and not 'auto'
+      const language = options.language || this.whisperConfig.language;
+      if (language && language !== 'auto') {
+        formData.append('language', language);
+      }
       
       // Add optional parameters
       if (options.prompt) {
         formData.append('prompt', options.prompt);
       }
-      if (options.temperature !== undefined) {
-        formData.append('temperature', options.temperature);
+      
+      const temperature = options.temperature !== undefined ? options.temperature : this.whisperConfig.temperature;
+      if (temperature !== undefined && temperature !== 0) {
+        formData.append('temperature', temperature);
       }
 
       const response = await axios.post(this.apiUrl, formData, {
@@ -49,7 +65,7 @@ class WhisperSTT {
           'Authorization': `Bearer ${this.apiKey}`,
           ...formData.getHeaders()
         },
-        timeout: 30000 // 30 second timeout
+        timeout: options.timeout || this.whisperConfig.timeout
       });
 
       const endTime = Date.now();
@@ -67,7 +83,7 @@ class WhisperSTT {
         timestamp: new Date().toISOString()
       };
 
-      console.log(`🎙️ Whisper transcription: "${result.text}" (${duration}ms)`);
+      console.log(`🎙️ Whisper transcription: "${result.text}" (${duration}ms, ${result.language})`);
       return result;
 
     } catch (error) {
@@ -133,17 +149,19 @@ class WhisperSTT {
   }
 
   /**
-   * Transcribe with language detection
+   * Transcribe with language detection fallback
    * @param {Buffer} audioBuffer - Audio data buffer
    * @param {Array} preferredLanguages - Array of language codes to try
    * @returns {Object} Transcription result with language info
    */
-  async transcribeWithLanguageDetection(audioBuffer, preferredLanguages = ['en', 'hi', 'sa']) {
+  async transcribeWithLanguageDetection(audioBuffer, preferredLanguages = null) {
     try {
-      // First, try auto-detection
-      let result = await this.transcribe(audioBuffer, { language: 'auto' });
+      const languages = preferredLanguages || this.whisperConfig.preferredLanguages;
       
-      if (result.success) {
+      // First, try auto-detection (no language parameter)
+      let result = await this.transcribe(audioBuffer);
+      
+      if (result.success && result.text.trim().length > 0) {
         return {
           ...result,
           detectedLanguage: result.language,
@@ -152,7 +170,7 @@ class WhisperSTT {
       }
 
       // If auto-detection fails, try preferred languages
-      for (const lang of preferredLanguages) {
+      for (const lang of languages) {
         console.log(`🔄 Trying language: ${lang}`);
         result = await this.transcribe(audioBuffer, { language: lang });
         
@@ -194,7 +212,7 @@ class WhisperSTT {
    * @returns {Object} Validation result
    */
   validateAudioBuffer(audioBuffer) {
-    const maxSize = 25 * 1024 * 1024; // 25MB limit from OpenAI
+    const maxSize = this.whisperConfig.maxFileSize;
     
     if (!audioBuffer || !Buffer.isBuffer(audioBuffer)) {
       return { valid: false, error: 'Invalid audio buffer' };
@@ -205,10 +223,29 @@ class WhisperSTT {
     }
     
     if (audioBuffer.length > maxSize) {
-      return { valid: false, error: `Audio file too large (${audioBuffer.length} bytes). Max: ${maxSize} bytes` };
+      return { 
+        valid: false, 
+        error: `Audio file too large (${audioBuffer.length} bytes). Max: ${maxSize} bytes` 
+      };
     }
     
     return { valid: true };
+  }
+
+  /**
+   * Get current configuration
+   * @returns {Object} Current Whisper configuration
+   */
+  getConfig() {
+    return {
+      model: this.whisperConfig.model,
+      language: this.whisperConfig.language,
+      timeout: this.whisperConfig.timeout,
+      maxFileSize: this.whisperConfig.maxFileSize,
+      preferredLanguages: this.whisperConfig.preferredLanguages,
+      responseFormat: this.whisperConfig.responseFormat,
+      temperature: this.whisperConfig.temperature
+    };
   }
 }
 
