@@ -1,0 +1,12 @@
+{
+  "name": "sanskrit-tutor",
+  "version": "1.0.0",
+  "description": "Sanskrit Tutor Voice Chat Application",
+  "scripts": {
+    "build": "echo 'Static build ready'",
+    "start": "echo 'Production ready'"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
