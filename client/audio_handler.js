@@ -28,8 +28,8 @@ class AudioHandler {
 		  await this.fetchVadConfig();
 		  
 		  // Initialize VAD
-		  const vadModule = await import('https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.7/dist/bundle.min.js');
-		  this.vad = await vad.MicVAD.new({
+		  //const vadModule = await import('https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.7/dist/bundle.min.js');
+		  this.vad = await window.vad.MicVAD.new({
 			  ...this.vadConfig,
 			  onSpeechStart: () => this.onSpeechStart(),
 			  onSpeechEnd: (samples) => this.onSpeechEnd(samples),
