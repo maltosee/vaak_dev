@@ -667,7 +667,94 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 // Setup UI event listeners
+// Setup UI event listeners
 function setupEventListeners() {
+  // ========== CONNECT BUTTON - This was missing! ==========
+	  const connectBtn = document.getElementById('connect-btn');
+	  if (connectBtn) {
+					connectBtn.addEventListener('click', async () => {
+				  const name = document.getElementById('name').value.trim();
+				  const apiKey = document.getElementById('apiKey').value.trim();
+				  
+				  if (!name || !apiKey) {
+					app.showError('Please enter both name and API key');
+					return;
+				  }
+				  
+				  // Show connecting status
+				  document.getElementById('auth-status').textContent = 'Connecting...';
+				  connectBtn.disabled = true;
+				  
+				  try {
+					// Since app already auto-connects, just transition to conversation
+					if (app.isConnected) {
+					  showConversationSection(name);
+					} else {
+					  await app.connect();
+					  showConversationSection(name);
+					}
+				  } catch (error) {
+					document.getElementById('auth-status').textContent = 'Connection failed';
+					connectBtn.disabled = false;
+				  }
+				});
+	  }
+}
+  
+  // Helper function to transition to conversation screen
+  function showConversationSection(userName) {
+    // Hide auth section
+    document.getElementById('auth-section').classList.add('hidden');
+    
+    // Show conversation section
+    document.getElementById('conversation-section').classList.remove('hidden');
+    
+    // Update user name display
+    const userNameElement = document.getElementById('user-name');
+    if (userNameElement) {
+      userNameElement.textContent = userName;
+    }
+    
+    // Update status
+    document.getElementById('status-text').textContent = 'Connected';
+    app.showStatus('Ready to start conversation!', 'success');
+  }
+  
+  // ========== START/STOP LISTENING BUTTONS ==========
+  const startListeningBtn = document.getElementById('start-listening-btn');
+  const stopListeningBtn = document.getElementById('stop-listening-btn');
+  
+  if (startListeningBtn) {
+    startListeningBtn.addEventListener('click', async () => {
+      await app.handleMicrophoneToggle();
+      startListeningBtn.classList.add('hidden');
+      stopListeningBtn.classList.remove('hidden');
+      document.getElementById('voice-status').textContent = 'Listening...';
+    });
+  }
+  
+  if (stopListeningBtn) {
+    stopListeningBtn.addEventListener('click', async () => {
+      await app.handleMicrophoneToggle();
+      stopListeningBtn.classList.add('hidden');
+      startListeningBtn.classList.remove('hidden');
+      document.getElementById('voice-status').textContent = 'Click "Start Listening" to begin';
+    });
+  }
+  
+  // ========== DISCONNECT BUTTON ==========
+  const disconnectBtn = document.getElementById('disconnect-btn');
+  if (disconnectBtn) {
+    disconnectBtn.addEventListener('click', () => {
+      app.stopListening();
+      document.getElementById('conversation-section').classList.add('hidden');
+      document.getElementById('auth-section').classList.remove('hidden');
+      document.getElementById('connect-btn').disabled = false;
+      document.getElementById('auth-status').textContent = '';
+    });
+  }
+
+  // ========== EXISTING CODE (keep as is) ==========
   // Microphone button
   const micButton = document.getElementById('mic-button');
   if (micButton) {
