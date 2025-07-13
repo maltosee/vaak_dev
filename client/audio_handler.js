@@ -22,22 +22,22 @@ class AudioHandler {
    */
   async initialize() {
     try {
-      console.log('🔧 Initializing VAD...');
-      
-      // Fetch VAD configuration from server
-      await this.fetchVadConfig();
-      
-      // Initialize VAD
-      const vadModule = await import('https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.7/dist/bundle.min.js');
-      this.vad = await vadModule.MicVAD.new({
-        ...this.vadConfig,
-        onSpeechStart: () => this.onSpeechStart(),
-        onSpeechEnd: (samples) => this.onSpeechEnd(samples),
-        onVADMisfire: () => this.onVadMisfire()
-      });
-      
-      this.isVadInitialized = true;
-      console.log('✅ VAD initialized successfully');
+		  console.log('🔧 Initializing VAD...');
+		  
+		  // Fetch VAD configuration from server
+		  await this.fetchVadConfig();
+		  
+		  // Initialize VAD
+		  const vadModule = await import('https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.7/dist/bundle.min.js');
+		  this.vad = await vadModule.MicVAD.new({
+			...this.vadConfig,
+			onSpeechStart: () => this.onSpeechStart(),
+			onSpeechEnd: (samples) => this.onSpeechEnd(samples),
+			onVADMisfire: () => this.onVadMisfire()
+		  });
+		  
+		  this.isVadInitialized = true;
+		  console.log('✅ VAD initialized successfully');
       
     } catch (error) {
       console.error('❌ VAD initialization failed:', error);
@@ -50,7 +50,11 @@ class AudioHandler {
    */
    async fetchVadConfig() {
 		  console.log('📋 Fetching VAD config from server');
-		  const response = await fetch('/config');
+		  //const response = await fetch('/config');
+		  
+		  const baseUrl = window.BACKEND_URL || ''; // default to current origin if not set
+		  const response = await fetch(`${baseUrl}/vad-config`);
+
 		  
 		  if (!response.ok) {
 			throw new Error(`❌ Failed to fetch /config (status: ${response.status})`);
