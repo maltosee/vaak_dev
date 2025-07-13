@@ -111,7 +111,6 @@ class SanskritTutorApp {
     async authenticate(name, apiKey) {
         try {
             const response = await fetch(`${CONFIG.getBaseURL()}/auth`, {
-
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
@@ -150,20 +149,47 @@ class SanskritTutorApp {
                 };
 
                 this.ws.onmessage = (event) => {
-                    // Handle binary audio data (ArrayBuffer from backend)
+                    console.log('🔍 DEBUG: Raw message received:', typeof event.data);
+					console.log('🔍 DEBUG: Is ArrayBuffer?', event.data instanceof ArrayBuffer);
+					console.log('🔍 DEBUG: Is Blob?', event.data instanceof Blob);
+					console.log('🔍 DEBUG: Size/Length:', event.data.length || event.data.size || event.data.byteLength);
+					
+					console.log('📨 Received message:', typeof event.data, event.data instanceof ArrayBuffer ? 'ArrayBuffer' : event.data instanceof Blob ? 'Blob' : 'String');
+                    
+                    // CRITICAL FIX: Check for binary data FIRST before JSON parsing
                     if (event.data instanceof ArrayBuffer) {
-                        console.log('🔊 Received audio response');
-                        this.audioHandler.playAudioResponse(event.data, 'mp3');
+                        console.log('🔊 Received audio response (ArrayBuffer):', event.data.byteLength, 'bytes');
+                        this.handleAudioResponse(event.data);
                         return;
                     }
                     
-                    // Handle JSON text messages
-                    try {
-                        const data = JSON.parse(event.data);
-                        this.handleWebSocketMessage(data);
-                    } catch (error) {
-                        console.error('❌ Error parsing JSON:', error);
+                    if (event.data instanceof Blob) {
+                        console.log('🔊 Received audio response (Blob):', event.data.size, 'bytes');
+                        // Convert Blob to ArrayBuffer for consistent handling
+                        event.data.arrayBuffer().then(arrayBuffer => {
+                            this.handleAudioResponse(arrayBuffer);
+                        }).catch(error => {
+                            console.error('❌ Error converting Blob to ArrayBuffer:', error);
+                            this.showError('Failed to process audio response');
+                        });
+                        return;
                     }
+                    
+                    // Handle string messages (JSON)
+                    if (typeof event.data === 'string') {
+                        try {
+                            const data = JSON.parse(event.data);
+                            this.handleWebSocketMessage(data);
+                        } catch (error) {
+                            console.error('❌ Error parsing JSON:', error);
+                            console.log('Raw message:', event.data);
+                            // Handle as plain text if JSON parsing fails
+                            this.handlePlainTextMessage(event.data);
+                        }
+                        return;
+                    }
+                    
+                    console.warn('⚠️ Unknown message type received:', typeof event.data);
                 };
 
                 this.ws.onclose = (event) => {
@@ -195,6 +221,73 @@ class SanskritTutorApp {
     }
 
     /**
+     * Handle binary audio response
+     * @param {ArrayBuffer} audioData - Audio data as ArrayBuffer
+     */
+    async handleAudioResponse(audioData) {
+        try {
+            console.log('🎵 Processing audio response...');
+            
+            // Update status to show we're about to play audio
+            this.setVoiceStatus('processing');
+            
+            // Create blob from ArrayBuffer
+            const audioBlob = new Blob([audioData], { type: 'audio/mpeg' });
+            
+            // Create object URL for audio
+            const audioUrl = URL.createObjectURL(audioBlob);
+            
+            // Create audio element
+            const audio = new Audio(audioUrl);
+            
+            // Set up audio event handlers
+            audio.onloadstart = () => console.log('🎵 Audio loading...');
+            audio.oncanplay = () => console.log('🎵 Audio ready to play');
+            audio.onplay = () => {
+                console.log('🎵 Audio playback started');
+                this.setVoiceStatus('speaking');
+            };
+            audio.onended = () => {
+                console.log('🎵 Audio playback completed');
+                URL.revokeObjectURL(audioUrl); // Clean up
+                this.setVoiceStatus('listening'); // Resume listening
+            };
+            audio.onerror = (error) => {
+                console.error('❌ Audio playback error:', error);
+                this.showError('Audio playback failed');
+                URL.revokeObjectURL(audioUrl);
+                this.setVoiceStatus('listening');
+            };
+            
+            // Play the audio
+            try {
+                await audio.play();
+                console.log('🎵 Audio playback initiated successfully');
+            } catch (playError) {
+                console.error('❌ Audio play() failed:', playError);
+                this.showError('Could not play audio. Please check browser permissions.');
+                URL.revokeObjectURL(audioUrl);
+                this.setVoiceStatus('listening');
+            }
+            
+        } catch (error) {
+            console.error('❌ Error handling audio response:', error);
+            this.showError('Failed to process audio response');
+            this.setVoiceStatus('listening');
+        }
+    }
+
+    /**
+     * Handle plain text messages (fallback)
+     * @param {string} message - Plain text message
+     */
+    handlePlainTextMessage(message) {
+        console.log('📝 Plain text message:', message);
+        this.addMessage('system', 'Server', message);
+        this.setVoiceStatus('listening');
+    }
+
+    /**
      * Handle incoming WebSocket messages
      * @param {Object} data - Parsed JSON message
      */
@@ -209,12 +302,16 @@ class SanskritTutorApp {
                     break;
 
                 case 'llm_response':
-                    this.addMessage('ai', 'Sanskrit Tutor', data.text, {
-                        transcription: data.transcription,
-                        language: data.language,
-                        processingTime: data.processingTime
-                    });
+                    // Handle text-only LLM responses
+                    if (data.text) {
+                        this.addMessage('ai', 'Sanskrit Tutor', data.text, {
+                            transcription: data.transcription,
+                            language: data.language,
+                            processingTime: data.processingTime
+                        });
+                    }
                     this.updateDebugInfo('AI Response', data);
+                    this.setVoiceStatus('listening'); // Resume listening after response
                     break;
 
                 case 'error':
@@ -256,6 +353,7 @@ class SanskritTutorApp {
                     this.setVoiceStatus('speaking');
                 },
                 onSpeechEnd: (audioBuffer) => {
+                    this.setVoiceStatus('processing');
                     this.sendAudioToServer(audioBuffer);
                 },
                 onError: (error) => {
@@ -401,7 +499,7 @@ class SanskritTutorApp {
                 break;
             case 'speaking':
                 circle.classList.add('speaking');
-                statusText.textContent = 'You are speaking...';
+                statusText.textContent = 'AI is responding...';
                 break;
             case 'processing':
                 circle.classList.add('processing');
