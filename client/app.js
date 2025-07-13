@@ -37,9 +37,10 @@ class SanskritTutorApp {
    */
   async connect() {
     try {
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = `${protocol}//${window.location.host}`;
+      //const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      //const wsUrl = `${protocol}//${window.location.host}`;
       
+	  const wsUrl = CONFIG.getWebSocketURL();
       console.log('🔌 Connecting to WebSocket:', wsUrl);
       
       this.ws = new WebSocket(wsUrl);
