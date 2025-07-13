@@ -53,7 +53,7 @@ class AudioHandler {
 		  //const response = await fetch('/config');
 		  
 		  const baseUrl = window.BACKEND_URL || ''; // default to current origin if not set
-		  const response = await fetch(`${baseUrl}/vad-config`);
+		  const response = await fetch(`${baseUrl}/config`);
 
 		  
 		  if (!response.ok) {
