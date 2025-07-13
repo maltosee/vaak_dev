@@ -1,651 +1,730 @@
-// Main application logic for Sanskrit Tutor
+// Sanskrit Tutor App with Dual STT and Transcript Display
 class SanskritTutorApp {
-    constructor() {
-        this.ws = null;
-        this.token = null;
-        this.audioHandler = null;
-        this.isConnected = false;
-        this.userName = '';
+  constructor() {
+    this.ws = null;
+    this.audioHandler = null;
+    this.isConnected = false;
+    this.isListening = false;
+    this.config = null;
+    this.reconnectAttempts = 0;
+    this.maxReconnectAttempts = 5;
+    this.reconnectDelay = 1000;
+    
+    console.log('🕉️ Sanskrit Tutor App initialized');
+  }
+
+  /**
+   * Initialize the application
+   */
+  async initialize() {
+    console.log('🚀 Initializing Sanskrit Tutor App...');
+    
+    try {
+      // Initialize audio handler
+      this.audioHandler = new AudioHandler();
+      this.audioHandler.onAudioData = (audioBlob) => this.sendAudioToServer(audioBlob);
+      
+      console.log('✅ App initialization completed');
+      
+    } catch (error) {
+      console.error('❌ App initialization failed:', error);
+      this.showError('Failed to initialize application');
+    }
+  }
+
+  /**
+   * Connect to WebSocket server
+   */
+  async connect() {
+    try {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${protocol}//${window.location.host}`;
+      
+      console.log('🔌 Connecting to WebSocket:', wsUrl);
+      
+      this.ws = new WebSocket(wsUrl);
+      this.setupWebSocketHandlers();
+      
+      // Wait for connection
+      await new Promise((resolve, reject) => {
+        this.ws.onopen = resolve;
+        this.ws.onerror = reject;
+        setTimeout(() => reject(new Error('Connection timeout')), 10000);
+      });
+      
+      // Initialize audio after successful connection
+      await this.initializeAudio();
+      
+      console.log('✅ Connected successfully');
+      this.showStatus('Connected to Sanskrit Tutor', 'success');
+      
+    } catch (error) {
+      console.error('❌ Connection failed:', error);
+      this.showError('Failed to connect to server');
+      this.scheduleReconnect();
+    }
+  }
+
+  /**
+   * Setup WebSocket event handlers
+   */
+  setupWebSocketHandlers() {
+    this.ws.onopen = () => {
+      console.log('🔌 WebSocket connected');
+      this.isConnected = true;
+      this.reconnectAttempts = 0;
+      this.updateConnectionStatus(true);
+    };
+
+    this.ws.onclose = (event) => {
+      console.log('🔌 WebSocket disconnected:', event.code, event.reason);
+      this.isConnected = false;
+      this.updateConnectionStatus(false);
+      
+      if (!event.wasClean) {
+        this.scheduleReconnect();
+      }
+    };
+
+    this.ws.onerror = (error) => {
+      console.error('❌ WebSocket error:', error);
+      this.showError('Connection error occurred');
+    };
+
+    this.ws.onmessage = (event) => {
+      this.handleWebSocketMessage(event);
+    };
+  }
+
+  /**
+   * Handle incoming WebSocket messages
+   */
+  handleWebSocketMessage(event) {
+    try {
+      // Debug logging
+      console.log('🔍 DEBUG: Raw message received:', typeof event.data);
+      console.log('🔍 DEBUG: Is ArrayBuffer?', event.data instanceof ArrayBuffer);
+      console.log('🔍 DEBUG: Is Blob?', event.data instanceof Blob);
+      console.log('🔍 DEBUG: Size/Length:', event.data.size || event.data.length || event.data.byteLength);
+      
+      console.log('📨 Received message:', typeof event.data, event.data.constructor.name);
+      
+      if (typeof event.data === 'string') {
+        const data = JSON.parse(event.data);
+        console.log('📨 Received message:', data.type);
         
-        console.log('🕉️ Sanskrit Tutor App initialized');
+        switch (data.type) {
+          case 'connected':
+            this.handleConnectedMessage(data);
+            break;
+            
+          case 'config':
+            this.handleConfigMessage(data);
+            break;
+            
+          case 'llm_response':
+            this.handleLLMResponse(data);
+            break;
+            
+          case 'error':
+            this.handleErrorMessage(data);
+            break;
+            
+          case 'pong':
+            console.log('🏓 Pong received');
+            break;
+            
+          default:
+            console.log(`⚠️ Unknown message type: ${data.type}`);
+        }
         
-        // Initialize when DOM is ready
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', () => this.init());
-        } else {
-            this.init();
-        }
+      } else if (event.data instanceof Blob) {
+        this.handleAudioResponse(event.data);
+      } else if (event.data instanceof ArrayBuffer) {
+        this.handleAudioResponse(new Blob([event.data]));
+      }
+      
+    } catch (error) {
+      console.error('❌ Message handling error:', error);
+      this.showError('Failed to process server response');
     }
+  }
 
-    /**
-     * Initialize the application
-     */
-    async init() {
-        try {
-            console.log('🚀 Initializing Sanskrit Tutor App...');
-            
-            // Setup UI event listeners
-            this.setupEventListeners();
-            
-            // Initialize audio handler
-            this.audioHandler = new AudioHandler();
-            
-            // Show auth section first
-            this.showSection('auth-section');
-            
-            console.log('✅ App initialization completed');
-            
-        } catch (error) {
-            console.error('❌ App initialization failed:', error);
-            this.showError('Application initialization failed');
-        }
+  /**
+   * Handle connected message from server
+   */
+  handleConnectedMessage(data) {
+    console.log('✅ Server connection confirmed');
+    this.showStatus('Connected to Sanskrit Tutor', 'success');
+  }
+
+  /**
+   * Handle configuration message from server
+   */
+  handleConfigMessage(data) {
+    console.log('📋 Received server configuration:', data);
+    this.config = data;
+    
+    // Update audio handler with VAD delay
+    if (data.vadEndDelayMs && this.audioHandler) {
+      this.audioHandler.updateVadEndDelay(data.vadEndDelayMs);
     }
+    
+    // Update UI with configuration
+    this.updateConfigDisplay(data);
+  }
 
-    /**
-     * Setup UI event listeners
-     */
-    setupEventListeners() {
-        // Authentication
-        document.getElementById('connect-btn').addEventListener('click', () => this.connect());
-        document.getElementById('disconnect-btn').addEventListener('click', () => this.disconnect());
-        
-        // Voice controls
-        document.getElementById('start-listening-btn').addEventListener('click', () => this.startListening());
-        document.getElementById('stop-listening-btn').addEventListener('click', () => this.stopListening());
-        
-        // Enter key support for auth form
-        document.getElementById('name').addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') this.connect();
-        });
-        document.getElementById('apiKey').addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') this.connect();
-        });
+  /**
+   * Handle LLM response with transcript display
+   */
+  handleLLMResponse(data) {
+    console.log('🤖 Received LLM response:', data);
+    
+    // Display user transcript first
+    if (data.transcription) {
+      this.displayUserTranscript(data.transcription, data.language || 'unknown');
     }
-
-    /**
-     * Connect to the Sanskrit tutor backend
-     */
-    async connect() {
-        try {
-            const name = document.getElementById('name').value.trim();
-            const apiKey = document.getElementById('apiKey').value.trim();
-            
-            if (!name || !apiKey) {
-                this.showAuthStatus('Please enter both name and API key', 'error');
-                return;
-            }
-
-            this.showAuthStatus('Connecting...', 'info');
-            
-            // Get authentication token
-            const token = await this.authenticate(name, apiKey);
-            if (!token) return;
-            
-            this.token = token;
-            this.userName = name;
-            
-            // Connect WebSocket
-            await this.connectWebSocket();
-            
-            // Initialize audio with VAD
-            await this.initializeAudio();
-            
-            // Switch to conversation view
-            this.showSection('conversation-section');
-            this.updateConnectionStatus(true);
-            
-            console.log('✅ Connected successfully');
-            
-        } catch (error) {
-            console.error('❌ Connection failed:', error);
-            this.showAuthStatus(`Connection failed: ${error.message}`, 'error');
-        }
+    
+    // Then display AI response
+    this.displayAIResponse(data.text);
+    
+    // Show processing time if available
+    if (data.processingTime) {
+      console.log(`⏱️ Total processing time: ${data.processingTime}ms`);
+      this.updateProcessingTime(data.processingTime);
     }
-
-    /**
-     * Authenticate with backend and get token
-     * @param {string} name - User name
-     * @param {string} apiKey - API key
-     * @returns {string|null} JWT token
-     */
-    async authenticate(name, apiKey) {
-        try {
-            const response = await fetch(`${CONFIG.getBaseURL()}/auth`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ name, apiKey })
-            });
-
-            const data = await response.json();
-            
-            if (!response.ok) {
-                throw new Error(data.error || 'Authentication failed');
-            }
-
-            this.showAuthStatus('Authentication successful!', 'success');
-            return data.token;
-            
-        } catch (error) {
-            this.showAuthStatus(`Authentication failed: ${error.message}`, 'error');
-            return null;
-        }
+    
+    // Show debug info if available
+    if (data.debug && this.config?.enableDebugLogging) {
+      console.log('🐛 Debug info:', data.debug);
     }
+  }
 
-    /**
-     * Connect WebSocket to backend
-     */
-    async connectWebSocket() {
-        return new Promise((resolve, reject) => {
-            try {
-                const wsUrl = `${CONFIG.getWebSocketURL()}?token=${this.token}`;
-                this.ws = new WebSocket(wsUrl);
+  /**
+   * Handle error message from server
+   */
+  handleErrorMessage(data) {
+    console.error('❌ Server error:', data.message);
+    this.showError(data.message);
+  }
 
-                this.ws.onopen = () => {
-                    console.log('🔌 WebSocket connected');
-                    this.isConnected = true;
-                    resolve();
-                };
-
-                this.ws.onmessage = (event) => {
-                    console.log('🔍 DEBUG: Raw message received:', typeof event.data);
-					console.log('🔍 DEBUG: Is ArrayBuffer?', event.data instanceof ArrayBuffer);
-					console.log('🔍 DEBUG: Is Blob?', event.data instanceof Blob);
-					console.log('🔍 DEBUG: Size/Length:', event.data.length || event.data.size || event.data.byteLength);
-					
-					console.log('📨 Received message:', typeof event.data, event.data instanceof ArrayBuffer ? 'ArrayBuffer' : event.data instanceof Blob ? 'Blob' : 'String');
-                    
-                    // CRITICAL FIX: Check for binary data FIRST before JSON parsing
-                    if (event.data instanceof ArrayBuffer) {
-                        console.log('🔊 Received audio response (ArrayBuffer):', event.data.byteLength, 'bytes');
-                        this.handleAudioResponse(event.data);
-                        return;
-                    }
-                    
-                    if (event.data instanceof Blob) {
-                        console.log('🔊 Received audio response (Blob):', event.data.size, 'bytes');
-                        // Convert Blob to ArrayBuffer for consistent handling
-                        event.data.arrayBuffer().then(arrayBuffer => {
-                            this.handleAudioResponse(arrayBuffer);
-                        }).catch(error => {
-                            console.error('❌ Error converting Blob to ArrayBuffer:', error);
-                            this.showError('Failed to process audio response');
-                        });
-                        return;
-                    }
-                    
-                    // Handle string messages (JSON)
-                    if (typeof event.data === 'string') {
-                        try {
-                            const data = JSON.parse(event.data);
-                            this.handleWebSocketMessage(data);
-                        } catch (error) {
-                            console.error('❌ Error parsing JSON:', error);
-                            console.log('Raw message:', event.data);
-                            // Handle as plain text if JSON parsing fails
-                            this.handlePlainTextMessage(event.data);
-                        }
-                        return;
-                    }
-                    
-                    console.warn('⚠️ Unknown message type received:', typeof event.data);
-                };
-
-                this.ws.onclose = (event) => {
-                    console.log('🔌 WebSocket closed:', event.code, event.reason);
-                    this.isConnected = false;
-                    this.updateConnectionStatus(false);
-                    
-                    if (event.code !== 1000) { // Not normal closure
-                        this.showError(`Connection lost: ${event.reason || 'Unknown error'}`);
-                    }
-                };
-
-                this.ws.onerror = (error) => {
-                    console.error('❌ WebSocket error:', error);
-                    reject(new Error('WebSocket connection failed'));
-                };
-
-                // Timeout for connection
-                setTimeout(() => {
-                    if (!this.isConnected) {
-                        reject(new Error('Connection timeout'));
-                    }
-                }, 10000);
-
-            } catch (error) {
-                reject(error);
-            }
-        });
+  /**
+   * Handle audio response from server
+   */
+  async handleAudioResponse(audioBlob) {
+    console.log(`🔊 Received audio response (Blob): ${audioBlob.size} bytes`);
+    
+    try {
+      await this.playAudioResponse(audioBlob);
+    } catch (error) {
+      console.error('❌ Audio playback error:', error);
+      this.showError('Failed to play audio response');
     }
+  }
 
-    /**
-     * Handle binary audio response
-     * @param {ArrayBuffer} audioData - Audio data as ArrayBuffer
-     */
-    async handleAudioResponse(audioData) {
-        try {
-            console.log('🎵 Processing audio response...');
-            
-            // Update status to show we're about to play audio
-            this.setVoiceStatus('processing');
-            
-            // Create blob from ArrayBuffer
-            const audioBlob = new Blob([audioData], { type: 'audio/mpeg' });
-            
-            // Create object URL for audio
-            const audioUrl = URL.createObjectURL(audioBlob);
-            
-            // Create audio element
-            const audio = new Audio(audioUrl);
-            
-            // Set up audio event handlers
-            audio.onloadstart = () => console.log('🎵 Audio loading...');
-            audio.oncanplay = () => console.log('🎵 Audio ready to play');
-            audio.onplay = () => {
-                console.log('🎵 Audio playback started');
-                this.setVoiceStatus('speaking');
-            };
-            audio.onended = () => {
-                console.log('🎵 Audio playback completed');
-                URL.revokeObjectURL(audioUrl); // Clean up
-                this.setVoiceStatus('listening'); // Resume listening
-            };
-            audio.onerror = (error) => {
-                console.error('❌ Audio playback error:', error);
-                this.showError('Audio playback failed');
-                URL.revokeObjectURL(audioUrl);
-                this.setVoiceStatus('listening');
-            };
-            
-            // Play the audio
-            try {
-                await audio.play();
-                console.log('🎵 Audio playback initiated successfully');
-            } catch (playError) {
-                console.error('❌ Audio play() failed:', playError);
-                this.showError('Could not play audio. Please check browser permissions.');
-                URL.revokeObjectURL(audioUrl);
-                this.setVoiceStatus('listening');
-            }
-            
-        } catch (error) {
-            console.error('❌ Error handling audio response:', error);
-            this.showError('Failed to process audio response');
-            this.setVoiceStatus('listening');
-        }
+  /**
+   * Play audio response from server
+   */
+  async playAudioResponse(audioBlob) {
+    console.log('🎵 Processing audio response...');
+    
+    try {
+      const audioUrl = URL.createObjectURL(audioBlob);
+      const audio = new Audio(audioUrl);
+      
+      // Set up audio event handlers
+      audio.onloadstart = () => console.log('🎵 Audio loading...');
+      audio.oncanplaythrough = () => console.log('🎵 Audio ready to play');
+      audio.onplay = () => console.log('🎵 Audio playback started');
+      audio.onended = () => {
+        console.log('🎵 Audio playback completed');
+        URL.revokeObjectURL(audioUrl);
+        this.onAudioPlaybackComplete();
+      };
+      audio.onerror = (error) => {
+        console.error('❌ Audio playback error:', error);
+        URL.revokeObjectURL(audioUrl);
+      };
+      
+      // Play the audio
+      await audio.play();
+      console.log('🎵 Audio playback initiated successfully');
+      
+    } catch (error) {
+      console.error('❌ Failed to play audio:', error);
+      throw error;
     }
+  }
 
-    /**
-     * Handle plain text messages (fallback)
-     * @param {string} message - Plain text message
-     */
-    handlePlainTextMessage(message) {
-        console.log('📝 Plain text message:', message);
-        this.addMessage('system', 'Server', message);
-        this.setVoiceStatus('listening');
+  /**
+   * Called when audio playback completes
+   */
+  onAudioPlaybackComplete() {
+    // Re-enable listening after audio playback
+    if (this.isListening && this.audioHandler) {
+      console.log('🎤 Re-enabling speech detection after audio playback');
     }
+  }
 
-    /**
-     * Handle incoming WebSocket messages
-     * @param {Object} data - Parsed JSON message
-     */
-    handleWebSocketMessage(data) {
-        try {
-            console.log('📨 Received message:', data.type);
+  /**
+   * Display user transcript in chat
+   */
+  displayUserTranscript(transcript, language) {
+    const messagesContainer = document.getElementById('messages');
+    if (!messagesContainer) return;
 
-            switch (data.type) {
-                case 'connected':
-                    this.addMessage('system', 'Connected to Sanskrit Tutor', data.message);
-                    this.updateDebugInfo('Connected', data);
-                    break;
+    const transcriptDiv = document.createElement('div');
+    transcriptDiv.className = 'message user-transcript';
+    transcriptDiv.innerHTML = `
+      <div class="message-header">
+        <span class="speaker">You said</span>
+        <span class="language">(${this.getLanguageDisplayName(language)})</span>
+        <span class="timestamp">${new Date().toLocaleTimeString()}</span>
+      </div>
+      <div class="message-content">${this.escapeHtml(transcript)}</div>
+    `;
+    
+    messagesContainer.appendChild(transcriptDiv);
+    this.scrollToBottom(messagesContainer);
+    
+    console.log(`📝 Displayed user transcript: "${transcript}" (${language})`);
+  }
 
-                case 'llm_response':
-                    // Handle text-only LLM responses
-                    if (data.text) {
-                        this.addMessage('ai', 'Sanskrit Tutor', data.text, {
-                            transcription: data.transcription,
-                            language: data.language,
-                            processingTime: data.processingTime
-                        });
-                    }
-                    this.updateDebugInfo('AI Response', data);
-                    this.setVoiceStatus('listening'); // Resume listening after response
-                    break;
+  /**
+   * Display AI response in chat
+   */
+  displayAIResponse(text) {
+    const messagesContainer = document.getElementById('messages');
+    if (!messagesContainer) return;
 
-                case 'error':
-                    this.showError(data.message);
-                    this.updateDebugInfo('Error', data);
-                    this.setVoiceStatus('listening'); // Resume listening after error
-                    break;
+    const responseDiv = document.createElement('div');
+    responseDiv.className = 'message ai-response';
+    responseDiv.innerHTML = `
+      <div class="message-header">
+        <span class="speaker">Sanskrit Tutor</span>
+        <span class="timestamp">${new Date().toLocaleTimeString()}</span>
+      </div>
+      <div class="message-content">${this.escapeHtml(text)}</div>
+    `;
+    
+    messagesContainer.appendChild(responseDiv);
+    this.scrollToBottom(messagesContainer);
+    
+    console.log(`🤖 Displayed AI response: "${text}"`);
+  }
 
-                case 'pong':
-                    console.log('📡 Received pong');
-                    break;
+  /**
+   * Get human-readable language name
+   */
+  getLanguageDisplayName(language) {
+    const languageNames = {
+      'sanskrit': 'Sanskrit',
+      'hindi': 'Hindi', 
+      'english': 'English',
+      'unknown': 'Unknown',
+      'text': 'Text Input'
+    };
+    
+    return languageNames[language] || language;
+  }
 
-                default:
-                    console.log('❓ Unknown message type:', data.type);
-                    this.updateDebugInfo('Unknown Message', data);
-            }
+  /**
+   * Escape HTML to prevent XSS
+   */
+  escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
 
-        } catch (error) {
-            console.error('❌ Error handling WebSocket message:', error);
-        }
+  /**
+   * Scroll container to bottom
+   */
+  scrollToBottom(container) {
+    container.scrollTop = container.scrollHeight;
+  }
+
+  /**
+   * Initialize audio system
+   */
+  async initializeAudio() {
+    try {
+      console.log('🎵 Initializing audio...');
+      
+      // Request microphone permission
+      const hasPermission = await this.audioHandler.requestMicrophonePermission();
+      if (!hasPermission) {
+        throw new Error('Microphone permission denied');
+      }
+      
+      // Initialize VAD
+      await this.audioHandler.initialize();
+      
+      console.log('✅ Audio initialized successfully');
+      this.updateAudioStatus('ready');
+      
+    } catch (error) {
+      console.error('❌ Audio initialization failed:', error);
+      this.showError('Failed to initialize audio. Please check microphone permissions.');
+      throw error;
     }
+  }
 
-    /**
-     * Initialize audio handler with VAD
-     */
-    async initializeAudio() {
-        try {
-            console.log('🎵 Initializing audio...');
-
-            // Test microphone access first
-            const micAccess = await this.audioHandler.testMicrophone();
-            if (!micAccess) {
-                throw new Error('Microphone access denied. Please grant microphone permissions.');
-            }
-
-            // Initialize VAD with callbacks
-            const result = await this.audioHandler.initialize({
-                onSpeechStart: () => {
-                    this.setVoiceStatus('speaking');
-                },
-                onSpeechEnd: (audioBuffer) => {
-                    this.setVoiceStatus('processing');
-                    this.sendAudioToServer(audioBuffer);
-                },
-                onError: (error) => {
-                    this.showError(`Audio error: ${error}`);
-                },
-                onStatusChange: (status) => {
-                    this.setVoiceStatus(status);
-                }
-            });
-
-            if (!result.success) {
-                throw new Error(result.error);
-            }
-
-            console.log('✅ Audio initialized successfully');
-
-        } catch (error) {
-            console.error('❌ Audio initialization failed:', error);
-            throw error;
-        }
+  /**
+   * Start listening for speech
+   */
+  async startListening() {
+    try {
+      if (!this.audioHandler || !this.audioHandler.isVadInitialized) {
+        throw new Error('Audio handler not initialized');
+      }
+      
+      console.log('🎤 Starting speech detection...');
+      await this.audioHandler.startListening();
+      this.isListening = true;
+      
+      this.updateMicrophoneButton(true);
+      console.log('🎤 Started listening');
+      
+    } catch (error) {
+      console.error('❌ Failed to start listening:', error);
+      this.showError('Failed to start speech detection');
     }
+  }
 
-    /**
-     * Start listening for voice input
-     */
-    async startListening() {
-        try {
-            if (!this.isConnected) {
-                this.showError('Not connected to server');
-                return;
-            }
-
-            const result = await this.audioHandler.startListening();
-            if (result.success) {
-                document.getElementById('start-listening-btn').classList.add('hidden');
-                document.getElementById('stop-listening-btn').classList.remove('hidden');
-                this.setVoiceStatus('listening');
-                console.log('🎤 Started listening');
-            } else {
-                this.showError(`Failed to start listening: ${result.error}`);
-            }
-
-        } catch (error) {
-            console.error('❌ Error starting listening:', error);
-            this.showError('Failed to start listening');
-        }
+  /**
+   * Stop listening for speech
+   */
+  async stopListening() {
+    try {
+      console.log('🛑 Stopping speech detection...');
+      
+      if (this.audioHandler) {
+        await this.audioHandler.stopListening();
+      }
+      
+      this.isListening = false;
+      this.updateMicrophoneButton(false);
+      console.log('🛑 Stopped listening');
+      
+    } catch (error) {
+      console.error('❌ Failed to stop listening:', error);
     }
+  }
 
-    /**
-     * Stop listening for voice input
-     */
-    async stopListening() {
-        try {
-            const result = await this.audioHandler.stopListening();
-            if (result.success) {
-                document.getElementById('start-listening-btn').classList.remove('hidden');
-                document.getElementById('stop-listening-btn').classList.add('hidden');
-                this.setVoiceStatus('idle');
-                console.log('🛑 Stopped listening');
-            }
-
-        } catch (error) {
-            console.error('❌ Error stopping listening:', error);
-        }
+  /**
+   * Send audio data to server
+   */
+  sendAudioToServer(audioBlob) {
+    if (!this.isConnected || !this.ws) {
+      console.error('❌ Cannot send audio: WebSocket not connected');
+      return;
     }
+    
+    console.log(`📤 Sending audio to server: ${audioBlob.size} bytes`);
+    this.ws.send(audioBlob);
+  }
 
-    /**
-     * Send audio data to server via WebSocket
-     * @param {Uint8Array} audioBuffer - Audio data
-     */
-    sendAudioToServer(audioBuffer) {
-        try {
-            if (!this.isConnected || !this.ws) {
-                throw new Error('Not connected to server');
-            }
-
-            console.log(`📤 Sending audio to server: ${audioBuffer.length} bytes`);
-            
-            // Add user message to conversation
-            this.addMessage('user', 'You', 'Audio message sent', { 
-                audioSize: audioBuffer.length 
-            });
-
-            // Send binary audio data
-            this.ws.send(audioBuffer);
-
-        } catch (error) {
-            console.error('❌ Error sending audio:', error);
-            this.showError('Failed to send audio to server');
-            this.setVoiceStatus('listening'); // Resume listening
-        }
+  /**
+   * Send text message to server
+   */
+  sendTextMessage(message) {
+    if (!this.isConnected || !this.ws) {
+      console.error('❌ Cannot send message: WebSocket not connected');
+      return;
     }
+    
+    console.log('📤 Sending text message:', message);
+    this.ws.send(JSON.stringify(message));
+  }
 
-    /**
-     * Disconnect from server
-     */
-    async disconnect() {
-        try {
-            console.log('🔌 Disconnecting...');
-
-            // Stop audio
-            if (this.audioHandler) {
-                await this.audioHandler.destroy();
-            }
-
-            // Close WebSocket
-            if (this.ws) {
-                this.ws.close(1000, 'User disconnect');
-                this.ws = null;
-            }
-
-            this.isConnected = false;
-            this.token = null;
-
-            // Reset UI
-            this.showSection('auth-section');
-            this.clearMessages();
-            this.clearDebugInfo();
-
-            console.log('✅ Disconnected successfully');
-
-        } catch (error) {
-            console.error('❌ Error during disconnect:', error);
-        }
+  /**
+   * Update microphone button state
+   */
+  updateMicrophoneButton(isListening) {
+    const micButton = document.getElementById('mic-button');
+    if (!micButton) return;
+    
+    micButton.classList.toggle('listening', isListening);
+    micButton.classList.toggle('stopped', !isListening);
+    micButton.title = isListening ? 'Click to stop listening' : 'Click to start listening';
+    
+    const icon = micButton.querySelector('i');
+    if (icon) {
+      icon.className = isListening ? 'fas fa-microphone' : 'fas fa-microphone-slash';
     }
+  }
 
-    /**
-     * Set voice activity status
-     * @param {string} status - Status: idle, listening, speaking, processing
-     */
-    setVoiceStatus(status) {
-        const circle = document.getElementById('voice-circle');
-        const statusText = document.getElementById('voice-status');
-
-        // Remove all status classes
-        circle.classList.remove('listening', 'speaking', 'processing');
-
-        // Add new status class and update text
-        switch (status) {
-            case 'listening':
-                circle.classList.add('listening');
-                statusText.textContent = 'Listening for your voice...';
-                break;
-            case 'speaking':
-                circle.classList.add('speaking');
-                statusText.textContent = 'AI is responding...';
-                break;
-            case 'processing':
-                circle.classList.add('processing');
-                statusText.textContent = 'Processing your message...';
-                break;
-            case 'idle':
-            default:
-                statusText.textContent = 'Click "Start Listening" to begin';
-                break;
-        }
+  /**
+   * Update connection status display
+   */
+  updateConnectionStatus(isConnected) {
+    const statusElement = document.getElementById('connection-status');
+    if (statusElement) {
+      statusElement.className = `connection-status ${isConnected ? 'connected' : 'disconnected'}`;
+      statusElement.textContent = isConnected ? '🔗 Connected' : '🔌 Disconnected';
     }
+  }
 
-    /**
-     * Add message to conversation display
-     * @param {string} type - Message type: user, ai, system
-     * @param {string} sender - Sender name
-     * @param {string} content - Message content
-     * @param {Object} metadata - Additional metadata
-     */
-    addMessage(type, sender, content, metadata = {}) {
-        const messagesContainer = document.getElementById('messages');
-        const messageElement = document.createElement('div');
-        messageElement.className = `message ${type}`;
-
-        const time = new Date().toLocaleTimeString();
-        
-        let metadataHtml = '';
-        if (metadata.transcription) {
-            metadataHtml += `<div class="transcription">Transcription: "${metadata.transcription}"</div>`;
-        }
-        if (metadata.language) {
-            metadataHtml += `<div class="transcription">Language: ${metadata.language}</div>`;
-        }
-        if (metadata.processingTime) {
-            metadataHtml += `<div class="transcription">Processing time: ${metadata.processingTime}ms</div>`;
-        }
-        if (metadata.audioSize) {
-            metadataHtml += `<div class="transcription">Audio size: ${metadata.audioSize} bytes</div>`;
-        }
-
-        messageElement.innerHTML = `
-            <div class="message-header">
-                <span>${sender}</span>
-                <span class="message-time">${time}</span>
-            </div>
-            <div class="message-content">${content}</div>
-            ${metadataHtml}
-        `;
-
-        messagesContainer.appendChild(messageElement);
-        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+  /**
+   * Update audio status display
+   */
+  updateAudioStatus(status) {
+    const audioStatus = document.getElementById('audio-status');
+    if (audioStatus) {
+      const statusText = {
+        'initializing': '🔄 Initializing...',
+        'ready': '✅ Ready',
+        'listening': '🎤 Listening',
+        'processing': '⏳ Processing',
+        'error': '❌ Error'
+      };
+      
+      audioStatus.textContent = statusText[status] || status;
+      audioStatus.className = `audio-status ${status}`;
     }
+  }
 
-    /**
-     * Clear all messages
-     */
-    clearMessages() {
-        document.getElementById('messages').innerHTML = '';
+  /**
+   * Update configuration display
+   */
+  updateConfigDisplay(config) {
+    const configElement = document.getElementById('config-display');
+    if (configElement) {
+      configElement.innerHTML = `
+        <div class="config-item">
+          <span class="label">Dual STT:</span>
+          <span class="value">${config.enableDualSTT ? '✅ Enabled' : '❌ Disabled'}</span>
+        </div>
+        <div class="config-item">
+          <span class="label">VAD Delay:</span>
+          <span class="value">${config.vadEndDelayMs}ms</span>
+        </div>
+        <div class="config-item">
+          <span class="label">Sample Rate:</span>
+          <span class="value">${config.audioConfig?.sampleRate || 16000}Hz</span>
+        </div>
+      `;
     }
+  }
 
-    /**
-     * Update connection status display
-     * @param {boolean} connected - Connection status
-     */
-    updateConnectionStatus(connected) {
-        const statusElement = document.getElementById('connection-status');
-        const statusText = document.getElementById('status-text');
-        const userNameElement = document.getElementById('user-name');
-
-        if (connected) {
-            statusElement.className = 'status-bar connected';
-            statusText.textContent = 'Connected';
-            userNameElement.textContent = this.userName;
-        } else {
-            statusElement.className = 'status-bar';
-            statusText.textContent = 'Disconnected';
-            userNameElement.textContent = '';
-        }
+  /**
+   * Update processing time display
+   */
+  updateProcessingTime(timeMs) {
+    const timeElement = document.getElementById('processing-time');
+    if (timeElement) {
+      timeElement.textContent = `⏱️ ${timeMs}ms`;
+      timeElement.className = 'processing-time';
     }
+  }
 
-    /**
-     * Show authentication status
-     * @param {string} message - Status message
-     * @param {string} type - Status type: success, error, info
-     */
-    showAuthStatus(message, type) {
-        const statusElement = document.getElementById('auth-status');
-        statusElement.className = `status ${type}`;
-        statusElement.textContent = message;
+  /**
+   * Show status message
+   */
+  showStatus(message, type = 'info') {
+    console.log(`📢 Status (${type}): ${message}`);
+    
+    const statusElement = document.getElementById('status-message');
+    if (statusElement) {
+      statusElement.textContent = message;
+      statusElement.className = `status-message ${type}`;
+      
+      // Auto-hide after 5 seconds
+      setTimeout(() => {
+        statusElement.textContent = '';
+        statusElement.className = 'status-message';
+      }, 5000);
     }
+  }
 
-    /**
-     * Show error message
-     * @param {string} message - Error message
-     */
-    showError(message) {
-        this.addMessage('system', 'System', `Error: ${message}`);
-        console.error('❌ App error:', message);
-    }
+  /**
+   * Show error message
+   */
+  showError(message) {
+    console.error(`❌ App error: ${message}`);
+    this.showStatus(message, 'error');
+  }
 
-    /**
-     * Show specific section and hide others
-     * @param {string} sectionId - Section ID to show
-     */
-    showSection(sectionId) {
-        const sections = ['auth-section', 'conversation-section'];
-        sections.forEach(id => {
-            const element = document.getElementById(id);
-            if (id === sectionId) {
-                element.classList.remove('hidden');
-            } else {
-                element.classList.add('hidden');
-            }
-        });
+  /**
+   * Schedule reconnection attempt
+   */
+  scheduleReconnect() {
+    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+      console.log('❌ Max reconnection attempts reached');
+      this.showError('Connection lost. Please refresh the page.');
+      return;
     }
+    
+    this.reconnectAttempts++;
+    const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1); // Exponential backoff
+    
+    console.log(`🔄 Scheduling reconnection attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts} in ${delay}ms`);
+    this.showStatus(`Reconnecting in ${delay/1000}s... (${this.reconnectAttempts}/${this.maxReconnectAttempts})`, 'warning');
+    
+    setTimeout(() => this.connect(), delay);
+  }
 
-    /**
-     * Update debug information
-     * @param {string} label - Debug label
-     * @param {Object} data - Debug data
-     */
-    updateDebugInfo(label, data) {
-        const debugElement = document.getElementById('debug-info');
-        const timestamp = new Date().toLocaleTimeString();
-        
-        debugElement.textContent += `[${timestamp}] ${label}:\n${JSON.stringify(data, null, 2)}\n\n`;
-        debugElement.scrollTop = debugElement.scrollHeight;
+  /**
+   * Handle microphone button click
+   */
+  async handleMicrophoneToggle() {
+    try {
+      if (this.isListening) {
+        await this.stopListening();
+      } else {
+        await this.startListening();
+      }
+    } catch (error) {
+      console.error('❌ Microphone toggle error:', error);
+      this.showError('Failed to toggle microphone');
     }
+  }
 
-    /**
-     * Clear debug information
-     */
-    clearDebugInfo() {
-        document.getElementById('debug-info').textContent = '';
+  /**
+   * Handle text input submission
+   */
+  handleTextInput(text) {
+    if (!text.trim()) return;
+    
+    this.sendTextMessage({
+      type: 'text_input',
+      text: text.trim()
+    });
+    
+    // Clear input
+    const textInput = document.getElementById('text-input');
+    if (textInput) {
+      textInput.value = '';
     }
+  }
 
-    /**
-     * Send ping to server (for testing connectivity)
-     */
-    sendPing() {
-        if (this.ws && this.isConnected) {
-            this.ws.send(JSON.stringify({ type: 'ping' }));
-            console.log('📡 Sent ping');
-        }
+  /**
+   * Send ping to server
+   */
+  sendPing() {
+    this.sendTextMessage({ type: 'ping' });
+  }
+
+  /**
+   * Get application status
+   */
+  getStatus() {
+    return {
+      isConnected: this.isConnected,
+      isListening: this.isListening,
+      audioHandler: this.audioHandler?.getStatus(),
+      config: this.config,
+      reconnectAttempts: this.reconnectAttempts
+    };
+  }
+
+  /**
+   * Cleanup and shutdown
+   */
+  async cleanup() {
+    try {
+      console.log('🧹 Cleaning up application...');
+      
+      await this.stopListening();
+      
+      if (this.audioHandler) {
+        await this.audioHandler.cleanup();
+      }
+      
+      if (this.ws) {
+        this.ws.close();
+      }
+      
+      console.log('✅ Application cleanup completed');
+      
+    } catch (error) {
+      console.error('❌ Cleanup error:', error);
     }
+  }
 }
 
-// Initialize the app
-const app = new SanskritTutorApp();
+// ──────────────────────────────────────────────────────────────────────────────
+// Application Initialization and Event Handlers
+// ──────────────────────────────────────────────────────────────────────────────
+
+let app;
+
+// Initialize app when DOM is loaded
+document.addEventListener('DOMContentLoaded', async () => {
+  try {
+    app = new SanskritTutorApp();
+    await app.initialize();
+    await app.connect();
+    
+    // Setup event listeners
+    setupEventListeners();
+    
+  } catch (error) {
+    console.error('❌ Failed to start application:', error);
+  }
+});
+
+// Setup UI event listeners
+function setupEventListeners() {
+  // Microphone button
+  const micButton = document.getElementById('mic-button');
+  if (micButton) {
+    micButton.addEventListener('click', () => app.handleMicrophoneToggle());
+  }
+  
+  // Text input
+  const textInput = document.getElementById('text-input');
+  const sendButton = document.getElementById('send-button');
+  
+  if (textInput && sendButton) {
+    sendButton.addEventListener('click', () => {
+      app.handleTextInput(textInput.value);
+    });
+    
+    textInput.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        app.handleTextInput(textInput.value);
+      }
+    });
+  }
+  
+  // Clear chat button
+  const clearButton = document.getElementById('clear-chat');
+  if (clearButton) {
+    clearButton.addEventListener('click', () => {
+      const messagesContainer = document.getElementById('messages');
+      if (messagesContainer) {
+        messagesContainer.innerHTML = '';
+      }
+    });
+  }
+  
+  // Ping button (for testing)
+  const pingButton = document.getElementById('ping-button');
+  if (pingButton) {
+    pingButton.addEventListener('click', () => app.sendPing());
+  }
+}
+
+// Handle page unload
+window.addEventListener('beforeunload', () => {
+  if (app) {
+    app.cleanup();
+  }
+});
+
+// Handle page visibility changes
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    // Page is hidden, optionally pause listening
+    console.log('📱 Page hidden');
+  } else {
+    // Page is visible again
+    console.log('📱 Page visible');
+  }
+});
+
+// Export app for debugging
+window.SanskritTutorApp = app;

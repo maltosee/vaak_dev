@@ -1,248 +1,449 @@
-// Main server entry point
+// Sanskrit Tutor Backend Server with Dual STT Support
 const express = require('express');
+const http = require('http');
+const socketIo = require('socket.io');
 const cors = require('cors');
+const multer = require('multer');
+const path = require('path');
 const config = require('./utils/config');
-const authService = require('./modules/auth');
-const sessionManager = require('./modules/session');
 const voicePipeline = require('./modules/pipeline');
+const sessionManager = require('./modules/session');
+const pollyTTS = require('./modules/tts');
 
-// Validate configuration on startup
-if (!config.validate()) {
-  console.error('❌ Server startup failed due to configuration errors');
-  process.exit(1);
-}
-
+// Initialize Express app
 const app = express();
-const server = require('http').createServer(app);
+const server = http.createServer(app);
+
+// Configure Socket.IO with CORS
+const io = socketIo(server, {
+  cors: {
+    origin: config.cors.origin,
+    methods: ["GET", "POST"],
+    credentials: config.cors.credentials
+  },
+  maxHttpBufferSize: 10 * 1024 * 1024 // 10MB for audio files
+});
 
 // Middleware
-app.use(cors());
-app.use(express.json());
+app.use(cors({
+  origin: config.cors.origin,
+  credentials: config.cors.credentials
+}));
+app.use(express.json({ limit: '10mb' }));
+app.use(express.static('public'));
+
+// Configure multer for audio uploads
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 10 * 1024 * 1024 // 10MB limit
+  },
+  fileFilter: (req, file, cb) => {
+    const allowedMimes = ['audio/webm', 'audio/wav', 'audio/mp3', 'audio/ogg'];
+    cb(null, allowedMimes.includes(file.mimetype));
+  }
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+// API Routes
+// ──────────────────────────────────────────────────────────────────────────────
 
 // Health check endpoint
 app.get('/health', async (req, res) => {
-  const stats = sessionManager.getStats();
-  const pipelineHealth = await voicePipeline.healthCheck();
-  
-  res.json({
-    status: 'healthy',
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime(),
-    sessions: stats,
-    pipeline: pipelineHealth,
-    memory: process.memoryUsage(),
-    version: require('./package.json').version
-  });
-});
-
-// Authentication endpoint - simple token generation
-app.post('/auth', (req, res) => {
   try {
-    const { name, apiKey } = req.body;
-
-    // Simple API key validation (you can enhance this)
-    if (!apiKey || !name) {
-      return res.status(400).json({ 
-        error: 'Name and API key required' 
-      });
-    }
-
-    // For prototype: accept any API key (you can add validation later)
-    const token = authService.generateToken({ 
-      name, 
-      id: Date.now().toString(),
-      apiKey 
-    });
-
-    res.json({ 
-      success: true,
-      token,
-      message: `Welcome ${name}! Use this token to connect to WebSocket.`
-    });
-
+    const health = await voicePipeline.healthCheck();
+    const status = health.overall ? 200 : 503;
+    res.status(status).json(health);
   } catch (error) {
-    console.error('❌ Auth endpoint error:', error.message);
-    res.status(500).json({ 
-      error: 'Authentication failed' 
+    res.status(500).json({
+      overall: false,
+      error: error.message,
+      timestamp: new Date().toISOString()
     });
   }
 });
 
-// Session info endpoint (requires auth)
-app.get('/sessions', authService.authenticateHTTP, (req, res) => {
-  const stats = sessionManager.getStats();
-  res.json(stats);
-});
-
-// WebSocket setup
-const WebSocket = require('ws');
-const wss = new WebSocket.Server({ 
-  server,
-  verifyClient: (info) => {
-    // Basic verification - detailed auth happens in connection handler
-    return true;
-  }
+// Configuration endpoint for client settings
+app.get('/config', (req, res) => {
+  const clientConfig = {
+    vadEndDelayMs: config.stt.vadEndDelayMs,
+    enableDualSTT: config.stt.enableDualSTT,
+    audioConfig: {
+      sampleRate: config.audio.sampleRate,
+      channels: config.audio.channels,
+      maxDuration: config.audio.maxDuration
+    },
+    timestamp: new Date().toISOString()
+  };
+  
+  console.log('📋 Sending client config:', clientConfig);
+  res.json(clientConfig);
 });
 
 // VAD configuration endpoint
 app.get('/vad-config', (req, res) => {
   res.json({
-    executionProvider: process.env.VAD_EXECUTION_PROVIDER || 'cpu',
-    model: process.env.VAD_MODEL || 'silero_vad_legacy.onnx',
-    positiveSpeechThreshold: parseFloat(process.env.VAD_POSITIVE_SPEECH_THRESHOLD) || 0.5,
-    negativeSpeechThreshold: parseFloat(process.env.VAD_NEGATIVE_SPEECH_THRESHOLD) || 0.35,
-    redemptionFrames: parseInt(process.env.VAD_REDEMPTION_FRAMES) || 20,
-    frameSamples: parseInt(process.env.VAD_FRAME_SAMPLES) || 1536,
-    preSpeechPadFrames: parseInt(process.env.VAD_PRE_SPEECH_PAD_FRAMES) || 5,
-    minSpeechFrames: parseInt(process.env.VAD_MIN_SPEECH_FRAMES) || 10
+    vadEndDelayMs: config.stt.vadEndDelayMs,
+    enableDualSTT: config.stt.enableDualSTT,
+    timestamp: new Date().toISOString()
   });
 });
 
-// WebSocket connection handler
-wss.on('connection', (ws, req) => {
-  let userId = null;
-  
+// Authentication endpoint
+app.post('/auth', (req, res) => {
   try {
-    // Parse query parameters from URL
-    const url = new URL(req.url, `http://${req.headers.host}`);
-    const query = Object.fromEntries(url.searchParams);
+    const { name } = req.body;
+    const username = name || 'Anonymous User';
+    const token = sessionManager.generateToken(username);
     
-    // Authenticate WebSocket connection
-    const authResult = authService.authenticateWebSocket(query);
-    if (!authResult.success) {
-      ws.close(1008, authResult.error);
-      console.log('❌ WebSocket auth failed:', authResult.error);
-      return;
+    console.log(`✅ Token generated for user: ${username}`);
+    
+    res.json({
+      success: true,
+      token: token,
+      user: username,
+      expiresIn: config.session.timeout,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('❌ Authentication failed:', error.message);
+    res.status(500).json({
+      success: false,
+      error: 'Authentication failed',
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+// Pipeline statistics endpoint
+app.get('/stats', (req, res) => {
+  const stats = voicePipeline.getStats();
+  res.json({
+    ...stats,
+    activeSessions: sessionManager.getActiveSessionCount(),
+    timestamp: new Date().toISOString()
+  });
+});
+
+// Text-to-speech endpoint
+app.post('/tts', async (req, res) => {
+  try {
+    const { text, voice, language } = req.body;
+    
+    if (!text) {
+      return res.status(400).json({ error: 'Text is required' });
     }
 
-    // Create session
-    const session = sessionManager.createSession(authResult.user, ws);
-    userId = session.userId;
+    const ttsResult = await pollyTTS.synthesizeSpeech(text, {
+      voiceId: voice || 'Kajal',
+      languageCode: language || 'hi-IN',
+      engine: 'neural'
+    });
 
-    // Send welcome message
-    ws.send(JSON.stringify({
-      type: 'connected',
-      sessionId: session.sessionId,
-      user: authResult.user.name,
-      message: 'Connected successfully! Ready for voice conversation.'
-    }));
+    if (ttsResult.success) {
+      res.set({
+        'Content-Type': 'audio/mpeg',
+        'Content-Length': ttsResult.audioBuffer.length
+      });
+      res.send(ttsResult.audioBuffer);
+    } else {
+      res.status(500).json({ error: ttsResult.error });
+    }
+  } catch (error) {
+    console.error('❌ TTS endpoint error:', error.message);
+    res.status(500).json({ error: 'TTS processing failed' });
+  }
+});
 
-    // Handle messages
-    ws.on('message', async (message) => {
-      try {
-        sessionManager.updateActivity(userId);
+// File upload endpoint for testing
+app.post('/upload-audio', upload.single('audio'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No audio file provided' });
+    }
+
+    const userId = req.body.userId || 'upload-user';
+    const result = await voicePipeline.processVoiceConversation(req.file.buffer, userId);
+    
+    res.json(result);
+  } catch (error) {
+    console.error('❌ Upload processing error:', error.message);
+    res.status(500).json({ error: 'Audio processing failed' });
+  }
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+// WebSocket Handling
+// ──────────────────────────────────────────────────────────────────────────────
+
+io.on('connection', (socket) => {
+  console.log('🔗 Client connected:', socket.id);
+  
+  // Send configuration to client immediately
+  socket.emit('message', JSON.stringify({
+    type: 'config',
+    vadEndDelayMs: config.stt.vadEndDelayMs,
+    enableDualSTT: config.stt.enableDualSTT,
+    audioConfig: {
+      sampleRate: config.audio.sampleRate,
+      channels: config.audio.channels
+    }
+  }));
+  
+  socket.emit('message', JSON.stringify({
+    type: 'connected',
+    message: 'WebSocket connection established',
+    timestamp: new Date().toISOString()
+  }));
+
+  // Handle audio messages
+  socket.on('message', async (data) => {
+    try {
+      if (Buffer.isBuffer(data)) {
+        await handleAudioMessage(data, socket);
+      } else if (typeof data === 'string') {
+        const parsed = JSON.parse(data);
+        await handleTextMessage(parsed, socket);
+      }
+    } catch (error) {
+      console.error('❌ WebSocket message error:', error.message);
+      socket.emit('message', JSON.stringify({
+        type: 'error',
+        message: 'Message processing failed'
+      }));
+    }
+  });
+
+  // Handle disconnection
+  socket.on('disconnect', (reason) => {
+    console.log('🔌 Client disconnected:', socket.id, 'Reason:', reason);
+    // Clean up any associated sessions
+    sessionManager.cleanupBySocketId(socket.id);
+  });
+
+  // Handle connection errors
+  socket.on('error', (error) => {
+    console.error('❌ Socket error:', error);
+  });
+});
+
+/**
+ * Handle audio message from WebSocket
+ * @param {Buffer} audioBuffer - Audio data from client
+ * @param {Socket} socket - WebSocket connection
+ */
+async function handleAudioMessage(audioBuffer, socket) {
+  const userId = socket.handshake.query.userId || socket.id;
+  
+  console.log(`🎤 Received audio: ${audioBuffer.length} bytes from ${userId}`);
+  
+  try {
+    // Process through pipeline
+    const pipelineResult = await voicePipeline.processVoiceConversation(audioBuffer, userId);
+    
+    if (pipelineResult.success) {
+      // Handle unrecognized language case
+      if (pipelineResult.isUnrecognizedLanguage) {
+        const errorResponse = {
+          type: 'llm_response',
+          text: pipelineResult.steps.llm.response,
+          transcription: 'Unrecognized Language',
+          language: 'unknown',
+          processingTime: pipelineResult.totalDuration,
+          timestamp: pipelineResult.timestamp
+        };
         
-        // Handle binary audio data
-        if (message instanceof Buffer) {
-          console.log(`🎤 Received audio: ${message.length} bytes from ${authResult.user.name}`);
-          
-          // Process through voice pipeline
-          const pipelineResult = await voicePipeline.processVoiceConversation(
-            message, 
-            userId, 
-            { audioFormat: 'webm' }
-          );
-          
-          if (pipelineResult.success) {
-            // Send text response first
-            ws.send(JSON.stringify({
-              type: 'llm_response',
-              text: pipelineResult.steps.llm.response,
-              transcription: pipelineResult.steps.stt.text,
-              language: pipelineResult.steps.stt.language,
-              processingTime: pipelineResult.totalDuration,
-              timestamp: new Date().toISOString()
-            }));
-            
-            // Send audio response
-            ws.send(pipelineResult.steps.tts.audioBuffer);
-            
-            console.log(`✅ Complete conversation processed for ${authResult.user.name}`);
-          } else {
-            ws.send(JSON.stringify({
-              type: 'error',
-              message: `Pipeline processing failed: ${pipelineResult.error}`,
-              timestamp: new Date().toISOString()
-            }));
-          }
-          
-          sessionManager.updateState(userId, 'listening');
-          
-        } else {
-          // Handle text messages
-          const data = JSON.parse(message);
-          console.log(`💬 Message from ${authResult.user.name}:`, data.type);
-          
-          switch (data.type) {
-            case 'ping':
-              ws.send(JSON.stringify({ type: 'pong', timestamp: new Date().toISOString() }));
-              break;
-            
-            case 'get_status':
-              const session = sessionManager.getSession(userId);
-              ws.send(JSON.stringify({ 
-                type: 'status', 
-                state: session?.state || 'unknown',
-                timestamp: new Date().toISOString()
-              }));
-              break;
-              
-            default:
-              ws.send(JSON.stringify({ 
-                type: 'error', 
-                message: `Unknown message type: ${data.type}` 
-              }));
-          }
+        console.log('🔍 DEBUG: About to send unrecognized language response');
+        socket.emit('message', JSON.stringify(errorResponse));
+        console.log('🔍 DEBUG: Unrecognized language response sent');
+        
+        // Generate and send error audio
+        await new Promise(resolve => setTimeout(resolve, 200));
+        const errorTTS = await pollyTTS.synthesizeSpeech(pipelineResult.steps.llm.response, {
+          voiceId: 'Kajal',
+          languageCode: 'hi-IN',
+          engine: 'neural'
+        });
+        
+        if (errorTTS.success) {
+          socket.emit('message', errorTTS.audioBuffer);
+          console.log('🔍 DEBUG: Error audio response sent');
         }
         
-      } catch (error) {
-        console.error('❌ Message handling error:', error.message);
-        ws.send(JSON.stringify({ 
-          type: 'error', 
-          message: 'Message processing failed' 
-        }));
+        return;
       }
-    });
-
-    // Handle connection close
-    ws.on('close', (code, reason) => {
-      console.log(`🔌 WebSocket closed: ${code} - ${reason}`);
-      if (userId) {
-        sessionManager.removeSession(userId, 'client_disconnect');
-      }
-    });
-
-    // Handle errors
-    ws.on('error', (error) => {
-      console.error('❌ WebSocket error:', error.message);
-      if (userId) {
-        sessionManager.removeSession(userId, 'websocket_error');
-      }
-    });
-
+      
+      // Normal successful processing
+      const response = {
+        type: 'llm_response',
+        text: pipelineResult.steps.llm.response,
+        transcription: pipelineResult.steps.stt.text,
+        language: pipelineResult.steps.stt.language,
+        processingTime: pipelineResult.totalDuration,
+        timestamp: pipelineResult.timestamp,
+        debug: config.development.enableDebugLogging ? pipelineResult.steps.stt.debug : undefined
+      };
+      
+      console.log('🔍 DEBUG: About to send JSON response');
+      socket.emit('message', JSON.stringify(response));
+      console.log('🔍 DEBUG: JSON response sent');
+      
+      // Send audio separately with delay for DataChannel
+      await new Promise(resolve => setTimeout(resolve, 200));
+      socket.emit('message', pipelineResult.steps.tts.audioBuffer);
+      console.log('🔍 DEBUG: Audio response sent');
+      
+      console.log(`✅ Complete conversation processed for ${userId}`);
+      
+      // Update session state back to listening
+      sessionManager.updateState(userId, 'listening');
+      
+    } else {
+      // Send error response
+      socket.emit('message', JSON.stringify({
+        type: 'error',
+        message: `Pipeline processing failed: ${pipelineResult.error}`,
+        timestamp: pipelineResult.timestamp
+      }));
+    }
+    
   } catch (error) {
-    console.error('❌ WebSocket connection error:', error.message);
-    ws.close(1011, 'Server error during connection setup');
+    console.error('❌ Audio processing error:', error);
+    socket.emit('message', JSON.stringify({
+      type: 'error',
+      message: 'Audio processing failed',
+      timestamp: new Date().toISOString()
+    }));
   }
+}
+
+/**
+ * Handle text message from WebSocket
+ * @param {Object} message - Parsed JSON message
+ * @param {Socket} socket - WebSocket connection
+ */
+async function handleTextMessage(message, socket) {
+  const userId = socket.handshake.query.userId || socket.id;
+  
+  console.log(`💬 Received text message from ${userId}:`, message.type);
+  
+  try {
+    switch (message.type) {
+      case 'text_input':
+        if (message.text) {
+          const result = await voicePipeline.processTextConversation(message.text, userId);
+          
+          if (result.success) {
+            socket.emit('message', JSON.stringify({
+              type: 'llm_response',
+              text: result.response,
+              transcription: result.inputText,
+              language: 'text',
+              processingTime: result.totalDuration,
+              timestamp: result.timestamp
+            }));
+            
+            // Send audio if available
+            if (result.audioBuffer) {
+              await new Promise(resolve => setTimeout(resolve, 200));
+              socket.emit('message', result.audioBuffer);
+            }
+          } else {
+            socket.emit('message', JSON.stringify({
+              type: 'error',
+              message: result.error
+            }));
+          }
+        }
+        break;
+        
+      case 'ping':
+        socket.emit('message', JSON.stringify({
+          type: 'pong',
+          timestamp: new Date().toISOString()
+        }));
+        break;
+        
+      case 'get_config':
+        socket.emit('message', JSON.stringify({
+          type: 'config',
+          vadEndDelayMs: config.stt.vadEndDelayMs,
+          enableDualSTT: config.stt.enableDualSTT,
+          audioConfig: {
+            sampleRate: config.audio.sampleRate,
+            channels: config.audio.channels
+          }
+        }));
+        break;
+        
+      default:
+        console.log(`⚠️ Unknown message type: ${message.type}`);
+    }
+    
+  } catch (error) {
+    console.error('❌ Text message processing error:', error);
+    socket.emit('message', JSON.stringify({
+      type: 'error',
+      message: 'Text message processing failed'
+    }));
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Error Handling & Cleanup
+// ──────────────────────────────────────────────────────────────────────────────
+
+// Global error handlers
+process.on('uncaughtException', (error) => {
+  console.error('💥 Uncaught Exception:', error);
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('💥 Unhandled Rejection at:', promise, 'reason:', reason);
 });
 
 // Graceful shutdown
 process.on('SIGTERM', () => {
-  console.log('🛑 Received SIGTERM, shutting down gracefully');
+  console.log('📴 SIGTERM received, shutting down gracefully');
   server.close(() => {
-    console.log('✅ Server closed');
+    console.log('📴 Server closed');
     process.exit(0);
   });
 });
 
-// Start server
+process.on('SIGINT', () => {
+  console.log('📴 SIGINT received, shutting down gracefully');
+  server.close(() => {
+    console.log('📴 Server closed');
+    process.exit(0);
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Server Startup
+// ──────────────────────────────────────────────────────────────────────────────
+
 const PORT = config.server.port;
-server.listen(PORT, '0.0.0.0',() => {
+const HOST = config.server.host;
+
+server.listen(PORT, HOST, async () => {
   console.log('🚀 Sanskrit Tutor Backend Started!');
-  console.log(`📡 Server: http://localhost:${PORT}`);
-  console.log(`🔌 WebSocket: ws://localhost:${PORT}?token=your_token`);
-  console.log(`🏥 Health: http://localhost:${PORT}/health`);
-  console.log(`🔐 Auth: POST http://localhost:${PORT}/auth`);
+  console.log(`📡 Server: http://${HOST}:${PORT}`);
+  console.log(`🔌 WebSocket: ws://${HOST}:${PORT}?token=your_token`);
+  console.log(`🏥 Health: http://${HOST}:${PORT}/health`);
+  console.log(`📋 Config: http://${HOST}:${PORT}/config`);
+  console.log(`🔐 Auth: POST http://${HOST}:${PORT}/auth`);
+  console.log(`🎵 TTS: POST http://${HOST}:${PORT}/tts`);
+  
+  // Display configuration info
   console.log('');
+  console.log('🔧 Configuration:');
+  console.log(`   Dual STT: ${config.stt.enableDualSTT ? '✅ Enabled' : '❌ Disabled'}`);
+  console.log(`   VAD Delay: ${config.stt.vadEndDelayMs}ms`);
+  console.log(`   Custom ASR: ${config.stt.customAsrUrl}`);
+  console.log(`   Environment: ${config.server.env}`);
+  console.log('');
+  
   console.log('Ready for voice conversations! 🎯');
 });

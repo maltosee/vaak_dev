@@ -1,8 +1,9 @@
 // Voice conversation pipeline: STT → LLM → TTS
-const whisperSTT = require('./whisper');
+const dualSTT = require('./dualSTT');
 const sanskritGPT = require('./gpt');
 const pollyTTS = require('./tts');
 const sessionManager = require('./session');
+const config = require('../utils/config');
 
 class VoicePipeline {
   constructor() {
@@ -25,7 +26,7 @@ class VoicePipeline {
       console.log('🔧 Initializing Voice Pipeline...');
       
       // Test each module
-      console.log('  ✅ Whisper STT module loaded');
+      console.log('  ✅ Dual STT module loaded');
       console.log('  ✅ Sanskrit GPT module loaded');  
       console.log('  ✅ Polly TTS module loaded');
       console.log('  ✅ Session Manager loaded');
@@ -60,18 +61,59 @@ class VoicePipeline {
       // Update session state
       sessionManager.updateState(userId, 'processing');
 
-      // Step 1: Speech to Text (STT)
+      // Step 1: Speech to Text (STT) with Dual STT
       console.log(`🎙️ Step 1: STT processing...`);
-      const sttResult = await whisperSTT.transcribe(audioBuffer, {
-        format: options.audioFormat || 'webm',
-        language: options.language || 'auto'
-      });
+      
+      let sttResult;
+      if (config.stt.enableDualSTT) {
+        // Use dual STT (Custom + Whisper with language detection)
+        sttResult = await dualSTT.transcribe(audioBuffer, {
+          format: options.audioFormat || 'webm',
+          language: options.language || 'auto'
+        });
+      } else {
+        // Fallback to original Whisper only
+        const whisperSTT = require('./whisper');
+        sttResult = await whisperSTT.transcribe(audioBuffer, {
+          format: options.audioFormat || 'webm',
+          language: options.language || 'auto'
+        });
+      }
 
       if (!sttResult.success) {
         throw new Error(`STT failed: ${sttResult.error}`);
       }
 
-      console.log(`📝 Transcription: "${sttResult.text}"`);
+      console.log(`📝 Transcription: "${sttResult.text}" (Language: ${sttResult.language})`);
+
+      // Handle unrecognized language
+      if (sttResult.text === 'Unrecognized Language' || sttResult.text === '') {
+        // Update session state back to listening
+        sessionManager.updateState(userId, 'listening');
+        
+        return {
+          success: true,
+          pipelineId,
+          steps: {
+            stt: {
+              text: 'Unrecognized Language',
+              language: 'unknown',
+              duration: sttResult.duration,
+              audioSize: sttResult.audioSize
+            },
+            llm: {
+              response: 'भाषा अपरीचिता। कृपया संस्कृतेन, हिंदी अथवा इंग्लिष् भाषया वदतु।',
+              tokens: 0,
+              duration: 0,
+              conversationLength: 0
+            },
+            tts: null // Will be handled by special case
+          },
+          totalDuration: Date.now() - startTime,
+          timestamp: new Date().toISOString(),
+          isUnrecognizedLanguage: true
+        };
+      }
 
       // Step 2: Language Model (LLM) 
       console.log(`🤖 Step 2: LLM processing...`);
@@ -92,12 +134,12 @@ class VoicePipeline {
 
       // Step 3: Text to Speech (TTS)
       console.log(`🔊 Step 3: TTS processing...`);
-      const ttsResult = await pollyTTS.synthesizeWithLanguageOptimization(
+      const ttsResult = await pollyTTS.synthesizeSpeech(
         llmResult.response,
-        sttResult.language,
         {
-          voiceId: options.voiceId,
-          engine: options.ttsEngine || 'standard'
+          voiceId: 'Kajal', // Use bilingual voice
+          languageCode: 'hi-IN', // Hindi base for bilingual
+          engine: 'neural' // Better quality
         }
       );
 
@@ -123,7 +165,8 @@ class VoicePipeline {
             text: sttResult.text,
             language: sttResult.language,
             duration: sttResult.duration,
-            audioSize: sttResult.audioSize
+            audioSize: sttResult.audioSize,
+            debug: sttResult.debug // Include dual STT debug info
           },
           llm: {
             response: llmResult.response,
@@ -193,7 +236,11 @@ class VoicePipeline {
       }
 
       // Step 2: TTS Processing
-      const ttsResult = await pollyTTS.synthesizeSpeech(llmResult.response, options);
+      const ttsResult = await pollyTTS.synthesizeSpeech(llmResult.response, {
+        voiceId: 'Kajal',
+        languageCode: 'hi-IN',
+        engine: 'neural'
+      });
       
       if (!ttsResult.success) {
         throw new Error(`TTS failed: ${ttsResult.error}`);
@@ -288,6 +335,7 @@ class VoicePipeline {
     const health = {
       pipeline: this.isInitialized,
       components: {
+        dualSTT: config.stt.enableDualSTT,
         whisper: true, // Always available (no persistent connection)
         gpt: true,     // Always available (no persistent connection)
         tts: true,     // Always available (no persistent connection)

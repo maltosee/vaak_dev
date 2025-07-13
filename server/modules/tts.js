@@ -1,4 +1,4 @@
-// AWS Polly TTS module
+// Enhanced TTS.js for Sanskrit Tutor with Bilingual Support
 const AWS = require('aws-sdk');
 const config = require('../utils/config');
 
@@ -12,303 +12,285 @@ class PollyTTS {
     });
 
     this.polly = new AWS.Polly();
-    this.defaultVoice = config.aws.pollyVoiceId;
-    this.defaultLanguage = config.aws.pollyLanguageCode;
     
-    if (!config.aws.accessKeyId || !config.aws.secretAccessKey) {
-      throw new Error('AWS credentials not configured');
-    }
+    // Use bilingual voices by default
+    this.bilingualVoices = {
+      'aditi': { voiceId: 'Aditi', engine: 'standard', languages: ['hi-IN', 'en-IN'] },
+      'kajal': { voiceId: 'Kajal', engine: 'neural', languages: ['hi-IN', 'en-IN'] }
+    };
     
-    console.log(`✅ Polly TTS initialized (Voice: ${this.defaultVoice}, Language: ${this.defaultLanguage})`);
+    this.defaultVoice = this.bilingualVoices.kajal; // Use neural for better quality
+    
+    console.log(`✅ Bilingual Polly TTS initialized (Voice: ${this.defaultVoice.voiceId}, Engine: ${this.defaultVoice.engine})`);
   }
 
   /**
-   * Convert text to speech using AWS Polly
-   * @param {string} text - Text to convert to speech
-   * @param {Object} options - TTS options
-   * @returns {Object} TTS result with audio buffer
+   * Enhanced synthesis for Sanskrit learning with bilingual support
    */
-  async synthesizeSpeech(text, options = {}) {
+  async synthesizeSanskritResponse(text, detectedLanguage, options = {}) {
     try {
       const startTime = Date.now();
 
-      // Prepare Polly parameters
+      // Choose optimal voice based on content
+      const selectedVoice = this.selectOptimalVoice(text, detectedLanguage, options);
+      
+      // Preprocess text for Sanskrit learning context
+      const processedText = this.preprocessSanskritLearningText(text, detectedLanguage);
+
+      // Prepare parameters for bilingual synthesis
       const params = {
-        Text: this.preprocessText(text),
+        Text: processedText,
         OutputFormat: options.outputFormat || 'mp3',
-        VoiceId: options.voiceId || this.defaultVoice,
-        LanguageCode: options.languageCode || this.defaultLanguage,
-        Engine: options.engine || 'standard', // 'standard' or 'neural'
-        SampleRate: options.sampleRate || '16000',
-        TextType: options.textType || 'text' // 'text' or 'ssml'
+        VoiceId: selectedVoice.voiceId,
+        LanguageCode: options.languageCode || 'hi-IN', // Use Hindi as base for bilingual
+        Engine: selectedVoice.engine,
+        SampleRate: options.sampleRate || '16000'
       };
 
-      // Add SSML support if needed
-      if (options.ssml) {
-        params.Text = this.wrapWithSSML(params.Text, options);
-        params.TextType = 'ssml';
-      }
-
-      console.log(`🔊 Synthesizing: "${text.substring(0, 50)}..." with voice ${params.VoiceId}`);
+      console.log(`🔊 Synthesizing bilingual: "${text.substring(0, 50)}..." with ${params.VoiceId} (${params.Engine})`);
 
       const result = await this.polly.synthesizeSpeech(params).promise();
       
-      const endTime = Date.now();
-      const duration = endTime - startTime;
-
       if (!result.AudioStream) {
         throw new Error('No audio stream received from Polly');
       }
 
-      // Convert stream to buffer
       const audioBuffer = Buffer.from(result.AudioStream);
+      const duration = Date.now() - startTime;
 
-      const response = {
+      console.log(`🎵 Bilingual TTS completed: ${audioBuffer.length} bytes in ${duration}ms`);
+      
+      return {
         success: true,
         audioBuffer,
         audioSize: audioBuffer.length,
         format: params.OutputFormat,
         voice: params.VoiceId,
+        engine: params.Engine,
         language: params.LanguageCode,
         duration,
-        sampleRate: params.SampleRate,
-        timestamp: new Date().toISOString(),
+        isBilingual: true,
         originalText: text
       };
 
-      console.log(`🎵 TTS completed: ${audioBuffer.length} bytes in ${duration}ms`);
-      return response;
-
     } catch (error) {
-      console.error('❌ TTS synthesis failed:', error.message);
-      
-      // Enhanced error handling
-      if (error.code) {
-        return {
-          success: false,
-          error: `Polly error (${error.code}): ${error.message}`,
-          code: error.code,
-          timestamp: new Date().toISOString()
-        };
-      }
-      
+      console.error('❌ Bilingual TTS synthesis failed:', error.message);
       return {
         success: false,
-        error: `TTS synthesis failed: ${error.message}`,
-        timestamp: new Date().toISOString()
+        error: `Bilingual TTS failed: ${error.message}`
       };
     }
   }
 
+  
+  
+  
   /**
-   * Synthesize speech with language-specific optimizations
-   * @param {string} text - Text to synthesize
-   * @param {string} detectedLanguage - Language detected from input
-   * @param {Object} options - Additional options
-   * @returns {Object} TTS result
+ * Convert text to speech using AWS Polly (main method)
+ * @param {string} text - Text to convert to speech
+ * @param {Object} options - TTS options
+ * @returns {Object} TTS result with audio buffer
+ */
+	async synthesizeSpeech(text, options = {}) {
+	  try {
+		const startTime = Date.now();
+
+		// Use bilingual voice by default
+		const selectedVoice = options.voiceId ? 
+		  this.bilingualVoices[options.voiceId.toLowerCase()] || this.defaultVoice : 
+		  this.defaultVoice;
+
+		// Preprocess text for better output
+		const processedText = this.preprocessSanskritLearningText(text, 'mixed');
+
+		// Prepare Polly parameters
+		const params = {
+		  Text: processedText,
+		  OutputFormat: options.outputFormat || 'mp3',
+		  VoiceId: selectedVoice.voiceId,
+		  LanguageCode: options.languageCode || 'hi-IN',
+		  Engine: selectedVoice.engine,
+		  SampleRate: options.sampleRate || '16000'
+		};
+
+		console.log(`🔊 Synthesizing: "${text.substring(0, 50)}..." with ${params.VoiceId} (${params.Engine})`);
+
+		const result = await this.polly.synthesizeSpeech(params).promise();
+		
+		if (!result.AudioStream) {
+		  throw new Error('No audio stream received from Polly');
+		}
+
+		const audioBuffer = Buffer.from(result.AudioStream);
+		const duration = Date.now() - startTime;
+
+		console.log(`🎵 TTS completed: ${audioBuffer.length} bytes in ${duration}ms`);
+		
+		return {
+		  success: true,
+		  audioBuffer,
+		  audioSize: audioBuffer.length,
+		  format: params.OutputFormat,
+		  voice: params.VoiceId,
+		  engine: params.Engine,
+		  language: params.LanguageCode,
+		  duration,
+		  originalText: text
+		};
+
+	  } catch (error) {
+		console.error('❌ TTS synthesis failed:', error.message);
+		return {
+		  success: false,
+		  error: `TTS synthesis failed: ${error.message}`
+		};
+	  }
+	}
+	  
+  /**
+   * Select optimal voice based on content analysis
    */
-  async synthesizeWithLanguageOptimization(text, detectedLanguage, options = {}) {
-    try {
-      // Select appropriate voice based on detected language
-      const voiceConfig = this.selectVoiceForLanguage(detectedLanguage);
-      
-      const enhancedOptions = {
-        ...options,
-        voiceId: options.voiceId || voiceConfig.voiceId,
-        languageCode: options.languageCode || voiceConfig.languageCode,
-        engine: voiceConfig.engine || 'standard'
-      };
-
-      // Add language-specific text preprocessing
-      const processedText = this.preprocessTextForLanguage(text, detectedLanguage);
-
-      return await this.synthesizeSpeech(processedText, enhancedOptions);
-
-    } catch (error) {
-      // Fallback to default voice if language-specific synthesis fails
-      console.warn(`⚠️ Language-specific TTS failed, falling back to default: ${error.message}`);
-      return await this.synthesizeSpeech(text, options);
+  selectOptimalVoice(text, detectedLanguage, options = {}) {
+    // User preference override
+    if (options.voiceId) {
+      const requestedVoice = Object.values(this.bilingualVoices)
+        .find(v => v.voiceId.toLowerCase() === options.voiceId.toLowerCase());
+      if (requestedVoice) return requestedVoice;
     }
+
+    // Content-based selection
+    const hasDevanagari = /[\u0900-\u097F]/.test(text);
+    const hasEnglish = /[A-Za-z]/.test(text);
+    const isMixed = hasDevanagari && hasEnglish;
+
+    // For mixed content or high-quality needs, prefer Neural (Kajal)
+    if (isMixed || options.quality === 'high') {
+      return this.bilingualVoices.kajal;
+    }
+
+    // Default to Aditi for standard use
+    return this.bilingualVoices.aditi;
   }
 
   /**
-   * Select appropriate voice for detected language
-   * @param {string} language - Detected language code
-   * @returns {Object} Voice configuration
+   * Preprocess text specifically for Sanskrit learning context
    */
-  selectVoiceForLanguage(language) {
-    const voiceMap = {
-      'en': { voiceId: 'Joanna', languageCode: 'en-US', engine: 'neural' },
-      'hi': { voiceId: 'Aditi', languageCode: 'hi-IN', engine: 'standard' },
-      'sa': { voiceId: 'Aditi', languageCode: 'hi-IN', engine: 'standard' }, // Sanskrit → Hindi voice
-      'auto': { voiceId: this.defaultVoice, languageCode: this.defaultLanguage, engine: 'standard' }
+  preprocessSanskritLearningText(text, detectedLanguage) {
+    let processed = text.trim();
+
+    // Handle common Sanskrit learning corrections
+    const sanskritCorrections = {
+      'किलमो': 'किलिमो',
+      'kilmo': 'kilimo',
+      'namo': 'namah',
+      'नमो': 'नमः'
     };
 
-    return voiceMap[language] || voiceMap['auto'];
-  }
+    // Apply corrections
+    Object.entries(sanskritCorrections).forEach(([incorrect, correct]) => {
+      const regex = new RegExp(`\\b${incorrect}\\b`, 'gi');
+      processed = processed.replace(regex, correct);
+    });
 
-  /**
-   * Preprocess text for better TTS output
-   * @param {string} text - Original text
-   * @returns {string} Preprocessed text
-   */
-  preprocessText(text) {
-    let processed = text.trim();
+    // Add natural pauses for learning context
+    processed = processed.replace(/([.!?])/g, '$1 '); // Add space after punctuation
+    processed = processed.replace(/([।॥])/g, '$1 '); // Add space after Devanagari punctuation
     
-    // Remove excessive punctuation
-    processed = processed.replace(/[.]{2,}/g, '.');
-    processed = processed.replace(/[!]{2,}/g, '!');
-    processed = processed.replace(/[?]{2,}/g, '?');
-    
-    // Add pauses for better speech flow
-    processed = processed.replace(/[.!?]/g, '$&<break time="0.5s"/>');
-    processed = processed.replace(/[,;]/g, '$&<break time="0.3s"/>');
-    
-    // Handle Sanskrit transliterations (basic)
-    processed = this.improveSanskritPronunciation(processed);
-    
+    // Handle romanized Sanskrit with pronunciation hints
+    processed = this.addSanskritPronunciationHints(processed);
+
     return processed;
   }
 
   /**
-   * Language-specific text preprocessing
-   * @param {string} text - Text to process
-   * @param {string} language - Language code
-   * @returns {string} Processed text
+   * Add pronunciation hints for Sanskrit words (using text, not SSML)
    */
-  preprocessTextForLanguage(text, language) {
-    switch (language) {
-      case 'sa': // Sanskrit
-        return this.preprocessSanskritText(text);
-      case 'hi': // Hindi
-        return this.preprocessHindiText(text);
-      case 'en': // English
-        return this.preprocessEnglishText(text);
-      default:
-        return this.preprocessText(text);
-    }
-  }
-
-  /**
-   * Improve Sanskrit pronunciation in text
-   * @param {string} text - Text with potential Sanskrit words
-   * @returns {string} Text with improved pronunciation
-   */
-  improveSanskritPronunciation(text) {
+  addSanskritPronunciationHints(text) {
     const pronunciationMap = {
-      'namaste': 'nah-mas-tay',
-      'guru': 'goo-roo',
-      'dharma': 'dhar-ma',
-      'karma': 'kar-ma',
-      'yoga': 'yo-ga',
-      'mantra': 'man-tra',
-      'pranayama': 'prah-nah-yah-ma',
-      'asana': 'ah-sa-na'
+      'namaste': 'namaskar', // More natural for Aditi/Kajal
+      'dharma': 'dharm',
+      'karma': 'karm',
+      'guru': 'guru',
+      'yoga': 'yog',
+      'mantra': 'mantr',
+      'pranayama': 'pranayam',
+      'asana': 'aasan'
     };
 
     let improved = text;
-    Object.entries(pronunciationMap).forEach(([word, pronunciation]) => {
-      const regex = new RegExp(`\\b${word}\\b`, 'gi');
-      improved = improved.replace(regex, `<phoneme alphabet="ipa" ph="${pronunciation}">${word}</phoneme>`);
+    Object.entries(pronunciationMap).forEach(([sanskrit, hindiEquivalent]) => {
+      // Only replace if it's not already in a learning context
+      const regex = new RegExp(`\\b${sanskrit}\\b(?! (means|is|का अर्थ))`, 'gi');
+      improved = improved.replace(regex, hindiEquivalent);
     });
 
     return improved;
   }
 
   /**
-   * Preprocess Sanskrit text
-   * @param {string} text - Sanskrit text
-   * @returns {string} Processed text
+   * Handle mixed language responses typical in Sanskrit learning
    */
-  preprocessSanskritText(text) {
-    // Add breathing pauses for Sanskrit mantras/verses
-    let processed = text.replace(/।/g, '<break time="1s"/>'); // Devanagari sentence end
-    processed = processed.replace(/॥/g, '<break time="1.5s"/>'); // Verse end
+  formatMixedLanguageResponse(englishPart, hindiPart, sanskritPart = '') {
+    let response = '';
     
-    return this.preprocessText(processed);
-  }
-
-  /**
-   * Preprocess Hindi text
-   * @param {string} text - Hindi text
-   * @returns {string} Processed text
-   */
-  preprocessHindiText(text) {
-    return this.preprocessText(text);
-  }
-
-  /**
-   * Preprocess English text
-   * @param {string} text - English text
-   * @returns {string} Processed text
-   */
-  preprocessEnglishText(text) {
-    return this.preprocessText(text);
-  }
-
-  /**
-   * Wrap text with SSML tags
-   * @param {string} text - Text to wrap
-   * @param {Object} options - SSML options
-   * @returns {string} SSML wrapped text
-   */
-  wrapWithSSML(text, options = {}) {
-    const rate = options.rate || 'medium'; // x-slow, slow, medium, fast, x-fast
-    const pitch = options.pitch || 'medium'; // x-low, low, medium, high, x-high
-    const volume = options.volume || 'medium'; // silent, x-soft, soft, medium, loud, x-loud
-
-    return `<speak>
-      <prosody rate="${rate}" pitch="${pitch}" volume="${volume}">
-        ${text}
-      </prosody>
-    </speak>`;
-  }
-
-  /**
-   * Get available voices for a language
-   * @param {string} languageCode - Language code (e.g., 'hi-IN')
-   * @returns {Promise<Array>} Array of available voices
-   */
-  async getAvailableVoices(languageCode) {
-    try {
-      const params = languageCode ? { LanguageCode: languageCode } : {};
-      const result = await this.polly.describeVoices(params).promise();
-      
-      return result.Voices.map(voice => ({
-        id: voice.Id,
-        name: voice.Name,
-        gender: voice.Gender,
-        languageCode: voice.LanguageCode,
-        languageName: voice.LanguageName,
-        engine: voice.SupportedEngines
-      }));
-    } catch (error) {
-      console.error('❌ Failed to get available voices:', error.message);
-      return [];
+    if (sanskritPart) {
+      response += `${sanskritPart} `;
     }
+    
+    if (hindiPart) {
+      response += `${hindiPart} `;
+    }
+    
+    if (englishPart) {
+      response += `${englishPart}`;
+    }
+
+    return response.trim();
   }
 
   /**
-   * Stream audio synthesis (for real-time playback)
-   * @param {string} text - Text to synthesize
-   * @param {Object} options - TTS options
-   * @returns {Promise<Stream>} Audio stream
+   * Get voice information for client
    */
-  async synthesizeSpeechStream(text, options = {}) {
-    try {
-      const params = {
-        Text: this.preprocessText(text),
-        OutputFormat: 'mp3',
-        VoiceId: options.voiceId || this.defaultVoice,
-        LanguageCode: options.languageCode || this.defaultLanguage,
-        Engine: options.engine || 'standard'
-      };
+  getAvailableVoices() {
+    return {
+      bilingual: Object.entries(this.bilingualVoices).map(([key, voice]) => ({
+        key,
+        name: voice.voiceId,
+        engine: voice.engine,
+        languages: voice.languages,
+        description: `${voice.voiceId} (${voice.engine}) - Supports Hindi and Indian English`,
+        recommended: key === 'kajal' ? 'Best quality (Neural)' : 'Standard quality'
+      })),
+      capabilities: {
+        mixedLanguage: true,
+        devanagari: true,
+        romanized: true,
+        englishHindi: true,
+        sameSentenceSwitching: true
+      }
+    };
+  }
 
-      const result = await this.polly.synthesizeSpeech(params).promise();
-      return result.AudioStream;
+  /**
+   * Test bilingual capabilities
+   */
+  async testBilingualCapabilities() {
+    const testTexts = [
+      "Hello, मेरा नाम Aditi है", // Mixed script
+      "This is a Sanskrit word: नमस्ते", // English + Devanagari
+      "Namaste का अर्थ है hello in English", // All three
+      "Let's learn yoga आसन today" // Mixed learning context
+    ];
 
-    } catch (error) {
-      throw new Error(`Stream synthesis failed: ${error.message}`);
+    console.log('🧪 Testing bilingual capabilities...');
+    
+    for (const text of testTexts) {
+      try {
+        const result = await this.synthesizeSanskritResponse(text, 'mixed');
+        console.log(`✅ Test passed: "${text}" -> ${result.audioSize} bytes`);
+      } catch (error) {
+        console.log(`❌ Test failed: "${text}" -> ${error.message}`);
+      }
     }
   }
 }
