@@ -698,11 +698,7 @@ function setupEventListeners() {
 									// Always connect (since we're not auto-connecting anymore)
 									  await app.connect();
 									  showConversationSection(name);
-								} else {
-								  console.log('🔍 DEBUG: Taking disconnected path - calling connect()');
-								  await app.connect();
-								  showConversationSection(name);
-								}
+								} 
 						  } catch (error) {
 								document.getElementById('auth-status').textContent = 'Connection failed';
 								connectBtn.disabled = false;
