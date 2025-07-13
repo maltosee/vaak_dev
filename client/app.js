@@ -794,7 +794,7 @@ function setupEventListeners() {
   if (pingButton) {
     pingButton.addEventListener('click', () => app.sendPing());
   }
-}
+
 
 // Handle page unload
 window.addEventListener('beforeunload', () => {
