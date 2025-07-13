@@ -656,7 +656,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   try {
     app = new SanskritTutorApp();
     await app.initialize();
-    await app.connect();
+    //await app.connect();
     
     // Setup event listeners
     setupEventListeners();
@@ -685,22 +685,27 @@ function setupEventListeners() {
 							app.showError('Please enter both name and API key');
 							return;
 						  }
+						   // Store user info
+							app.userName = name;
+							app.apiKey = apiKey;
 						  
 						  // Show connecting status
 						  document.getElementById('auth-status').textContent = 'Connecting...';
 						  connectBtn.disabled = true;
 						  
 						  try {
-							// Since app already auto-connects, just transition to conversation
-							if (app.isConnected) {
-							  showConversationSection(name);
-							} else {
-							  await app.connect();
-							  showConversationSection(name);
-							}
+								// FIXED CODE:
+									// Always connect (since we're not auto-connecting anymore)
+									  await app.connect();
+									  showConversationSection(name);
+								} else {
+								  console.log('🔍 DEBUG: Taking disconnected path - calling connect()');
+								  await app.connect();
+								  showConversationSection(name);
+								}
 						  } catch (error) {
-							document.getElementById('auth-status').textContent = 'Connection failed';
-							connectBtn.disabled = false;
+								document.getElementById('auth-status').textContent = 'Connection failed';
+								connectBtn.disabled = false;
 						  }
 				});
 	  }
