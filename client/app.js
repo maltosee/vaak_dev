@@ -673,30 +673,35 @@ function setupEventListeners() {
 	  const connectBtn = document.getElementById('connect-btn');
 	  if (connectBtn) {
 					connectBtn.addEventListener('click', async () => {
-				  const name = document.getElementById('name').value.trim();
-				  const apiKey = document.getElementById('apiKey').value.trim();
-				  
-				  if (!name || !apiKey) {
-					app.showError('Please enter both name and API key');
-					return;
-				  }
-				  
-				  // Show connecting status
-				  document.getElementById('auth-status').textContent = 'Connecting...';
-				  connectBtn.disabled = true;
-				  
-				  try {
-					// Since app already auto-connects, just transition to conversation
-					if (app.isConnected) {
-					  showConversationSection(name);
-					} else {
-					  await app.connect();
-					  showConversationSection(name);
-					}
-				  } catch (error) {
-					document.getElementById('auth-status').textContent = 'Connection failed';
-					connectBtn.disabled = false;
-				  }
+							
+						  console.log('🔍 DEBUG: app.isConnected =', app.isConnected);
+						  console.log('🔍 DEBUG: app.ws =', app.ws);
+						  console.log('🔍 DEBUG: app.ws.readyState =', app.ws?.readyState);
+						
+						  const name = document.getElementById('name').value.trim();
+						  const apiKey = document.getElementById('apiKey').value.trim();
+						  
+						  if (!name || !apiKey) {
+							app.showError('Please enter both name and API key');
+							return;
+						  }
+						  
+						  // Show connecting status
+						  document.getElementById('auth-status').textContent = 'Connecting...';
+						  connectBtn.disabled = true;
+						  
+						  try {
+							// Since app already auto-connects, just transition to conversation
+							if (app.isConnected) {
+							  showConversationSection(name);
+							} else {
+							  await app.connect();
+							  showConversationSection(name);
+							}
+						  } catch (error) {
+							document.getElementById('auth-status').textContent = 'Connection failed';
+							connectBtn.disabled = false;
+						  }
 				});
 	  }
 }
