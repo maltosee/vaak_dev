@@ -417,10 +417,18 @@ class SanskritTutorApp {
    * Send audio data to server
    */
   sendAudioToServer(audioBlob) {
-    if (!this.isConnected || !this.ws) {
-      console.error('❌ Cannot send audio: WebSocket not connected');
-      return;
-    }
+    
+	console.log('🔍 DEBUG sendAudio: isConnected =', this.isConnected);
+    console.log('🔍 DEBUG sendAudio: ws =', this.ws);
+    console.log('🔍 DEBUG sendAudio: ws.readyState =', this.ws?.readyState);
+	
+	// Check actual WebSocket state instead of isConnected flag
+	  if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+		console.error('❌ Cannot send audio: WebSocket not connected');
+		console.log('🔍 DEBUG: ws =', this.ws);
+		console.log('🔍 DEBUG: readyState =', this.ws?.readyState);
+		return;
+	  }
     
     console.log(`📤 Sending audio to server: ${audioBlob.size} bytes`);
     this.ws.send(audioBlob);
