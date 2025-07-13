@@ -699,7 +699,7 @@ function setupEventListeners() {
 									  await app.connect();
 									  showConversationSection(name);
 								} 
-						  } catch (error) {
+						   catch (error) {
 								document.getElementById('auth-status').textContent = 'Connection failed';
 								connectBtn.disabled = false;
 						  }
