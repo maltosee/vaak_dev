@@ -48,41 +48,35 @@ class AudioHandler {
   /**
    * Fetch VAD configuration from server
    */
-  async fetchVadConfig() {
-    try {
-      console.log('📋 Fetching VAD config from server');
-      const response = await fetch('/vad-config');
-      const config = await response.json();
-      
-      // Update VAD end delay from server
-      this.vadEndDelayMs = config.vadEndDelayMs || 1500;
-      
-      this.vadConfig = {
-        positiveSpeechThreshold: 0.5,
-        negativeSpeechThreshold: 0.35,
-        redemptionFrames: 8,
-        frameSamples: 1536,
-        preSpeechPadFrames: 1,
-        minSpeechFrames: 4
-      };
-      
-      console.log('✅ VAD config loaded from server');
-      console.log(`🔧 VAD end delay: ${this.vadEndDelayMs}ms`);
-      
-    } catch (error) {
-      console.error('❌ Failed to fetch VAD config:', error);
-      // Use defaults
-      this.vadEndDelayMs = 1500;
-      this.vadConfig = {
-        positiveSpeechThreshold: 0.5,
-        negativeSpeechThreshold: 0.35,
-        redemptionFrames: 8,
-        frameSamples: 1536,
-        preSpeechPadFrames: 1,
-        minSpeechFrames: 4
-      };
-    }
-  }
+   async fetchVadConfig() {
+		  console.log('📋 Fetching VAD config from server');
+		  const response = await fetch('/config');
+		  
+		  if (!response.ok) {
+			throw new Error(`❌ Failed to fetch /config (status: ${response.status})`);
+		  }
+
+		  const serverConfig = await response.json();
+
+		  // Mandatory: must exist or throw
+		  if (!serverConfig.vadConfig) {
+			throw new Error('❌ Missing vadConfig in server response');
+		  }
+
+		  this.vadEndDelayMs = serverConfig.vadEndDelayMs;
+		  this.vadConfig = {
+			positiveSpeechThreshold: serverConfig.vadConfig.positiveSpeechThreshold,
+			negativeSpeechThreshold: serverConfig.vadConfig.negativeSpeechThreshold,
+			redemptionFrames: serverConfig.vadConfig.redemptionFrames,
+			preSpeechPadFrames: serverConfig.vadConfig.preSpeechPadFrames,
+			minSpeechFrames: serverConfig.vadConfig.minSpeechFrames,
+			frameSamples: 1536  // optional: move to backend if needed
+		  };
+
+		  console.log('✅ VAD config loaded from server');
+		  console.log(`🔧 VAD end delay: ${this.vadEndDelayMs}ms`);
+	}
+
 
   /**
    * Update VAD end delay from server config
