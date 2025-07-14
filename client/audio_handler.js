@@ -14,6 +14,8 @@ class AudioHandler {
     this.delayTimeoutId = null;
     this.onAudioData = null; // Callback for audio data
 	this.audioMinDurationMs = 0; // Initialize, will be set from server config
+	this.lastSpeechEndTime = 0;
+	this.bargeInCooldownMs = config.bargeInCooldownMs || 20000;
     
     console.log('🎵 AudioHandler initialized');
   }
@@ -110,34 +112,33 @@ class AudioHandler {
    * @param {Float32Array} samples - Audio samples
    */
   async onSpeechEnd(samples) {
-    console.log(`🎤 Speech ended - processing ${samples.length} samples`);
+		console.log(`🎤 Speech ended - processing ${samples.length} samples`);
+		
+		  // ✅ ADD: Duration filter for nonsense utterances
+		  const durationMs = (samples.length / 16000) * 1000; // Assuming 16kHz sample rate
+		  if (durationMs < this.audioMinDurationMs) { // Filter out utterances shorter than 0.5 seconds
+			console.log(`⏱️ Skipping short utterance (${Math.round(durationMs)}ms < 500ms)`);
+			this.isRecording = false;
+			this.updateUIState('listening');
+			return;
+		  }
+		
+		
+		this.lastSpeechEndTime = Date.now(); // Track last speech end timestamp
 	
-	// ✅ ADD: Check if audio is still playing
-	  const audioPlayer = document.getElementById('audio-player');
-	  if (audioPlayer && !audioPlayer.paused) {
-		console.log(`🔊 Skipping speech - audio still playing`);
-		this.isRecording = false;
-		this.updateUIState('listening');
-		return;
-	  }
+		// Now check for barge-in logic
+		  if (audioPlayer && !audioPlayer.paused) {
+				const timeSinceLastSpeech = Date.now() - this.lastSpeechEndTime;
+				if (timeSinceLastSpeech < this.bargeInCooldownMs) {
+				  console.log(`🔊 Barge-in blocked - cooldown active (${timeSinceLastSpeech}ms < ${this.bargeInCooldownMs}ms)`);
+				  return;
+				}
+				audioPlayer.pause();
+				console.log(`🔊 Barge-in allowed - stopping current TTS`);
+		  }
+
 
 	
-	/**const minDurationMs = this.audioMinDurationMs;
-	const durationMs = (samples.length / this.sampleRate) * 1000;
-	if (durationMs < minDurationMs) {
-	  console.log(`⏱️ Skipping short utterance (${Math.round(durationMs)}ms < ${minDurationMs}ms)`);
-	  this.updateUIState('listening');
-	  return;
-	}**/
-
-	  // ✅ ADD: Duration filter for nonsense utterances
-     const durationMs = (samples.length / 16000) * 1000; // Assuming 16kHz sample rate
-	  if (durationMs < this.audioMinDurationMs) { // Filter out utterances shorter than 0.5 seconds
-		console.log(`⏱️ Skipping short utterance (${Math.round(durationMs)}ms < 500ms)`);
-		this.isRecording = false;
-		this.updateUIState('listening');
-		return;
-	  }
 
 	
     
