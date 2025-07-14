@@ -15,7 +15,7 @@ class AudioHandler {
     this.onAudioData = null; // Callback for audio data
 	this.audioMinDurationMs = 0; // Initialize, will be set from server config
 	this.lastSpeechEndTime = 0;
-	this.bargeInCooldownMs = 0;
+	//this.bargeInCooldownMs = 0;
 	this.audioPlayer = options.audioPlayer || new Audio();
     
     console.log('🎵 AudioHandler initialized');
@@ -73,7 +73,7 @@ class AudioHandler {
 
 		  this.vadEndDelayMs = serverConfig.vadEndDelayMs;
 		  this.audioMinDurationMs = parseInt(serverConfig.audioConfig?.minDuration) || 1500;
-		  this.bargeInCooldownMs = parseInt(serverConfig.audioConfig?.bargeInCooldownMs) || 20000;
+		 // this.bargeInCooldownMs = parseInt(serverConfig.audioConfig?.bargeInCooldownMs) || 20000;
 
 		  this.vadConfig = {
 			positiveSpeechThreshold: serverConfig.vadConfig.positiveSpeechThreshold,
@@ -129,18 +129,6 @@ class AudioHandler {
 		
 		this.lastSpeechEndTime = Date.now(); // Track last speech end timestamp
 	
-		// Now check for barge-in logic
-		  if (this.audioPlayer && !this.audioPlayer.paused) {
-				const timeSinceLastSpeech = Date.now() - this.lastSpeechEndTime;
-				if (timeSinceLastSpeech < this.bargeInCooldownMs) {
-				  console.log(`🔊 Barge-in blocked - cooldown active (${timeSinceLastSpeech}ms < ${this.bargeInCooldownMs}ms)`);
-				  return;
-				}
-				this.audioPlayer.pause();
-				console.log(`🔊 Barge-in allowed - stopping current TTS`);
-		  }
-
-
 	
 
 	
@@ -255,17 +243,60 @@ class AudioHandler {
     return new Uint8Array(header);
   }
 
+
+async checkServerReady() {
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => {
+      console.warn('⚠️ No response from server — assuming busy');
+      resolve(false);
+    }, 1000);
+
+    const listener = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.type === 'status_update') {
+          if (data.statusCode === 'BUSY_SERVER') {
+            clearTimeout(timeout);
+            this.socket.removeEventListener('message', listener);
+            resolve(false);
+          } else {
+            clearTimeout(timeout);
+            this.socket.removeEventListener('message', listener);
+            resolve(true);
+          }
+        }
+      } catch (e) {
+        // ignore non-JSON
+      }
+    };
+
+    this.socket.addEventListener('message', listener);
+
+    // Send a ping asking for readiness
+    this.socket.send(JSON.stringify({ type: 'check_ready' }));
+  });
+}
+
+
   /**
    * Send audio data to server via callback
    * @param {Blob} audioBlob - Audio data
    */
-  sendAudioToServer(audioBlob) {
-    if (this.onAudioData && typeof this.onAudioData === 'function') {
-      this.onAudioData(audioBlob);
-    } else {
-      console.error('❌ No audio data callback configured');
-    }
-  }
+	async sendAudioToServer(audioBlob) {
+		  const arrayBuffer = await audioBlob.arrayBuffer();
+		  const uint8Array = new Uint8Array(arrayBuffer);
+
+		  // Check server readiness before sending
+		  const statusCheck = await this.checkServerReady();
+		  if (!statusCheck) {
+			console.warn('⛔ Server busy — skipping audio send to prevent barge-in.');
+			return;
+		  }
+
+		  console.log(`📤 Sending audio to server: ${uint8Array.length} bytes`);
+		  this.socket.send(uint8Array); // or however you send audio
+	}
+
 
   /**
    * Handle VAD misfire (false positive)
