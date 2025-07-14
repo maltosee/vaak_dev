@@ -15,7 +15,7 @@ class AudioHandler {
     this.onAudioData = null; // Callback for audio data
 	this.audioMinDurationMs = 0; // Initialize, will be set from server config
 	this.lastSpeechEndTime = 0;
-	this.bargeInCooldownMs = config.bargeInCooldownMs || 20000;
+	this.bargeInCooldownMs = 0;
     
     console.log('🎵 AudioHandler initialized');
   }
@@ -72,6 +72,7 @@ class AudioHandler {
 
 		  this.vadEndDelayMs = serverConfig.vadEndDelayMs;
 		  this.audioMinDurationMs = parseInt(serverConfig.audioConfig?.minDuration) || 1500;
+		  this.bargeInCooldownMs = parseInt(serverConfig.audioConfig?.bargeInCooldownMs) || 20000;
 
 		  this.vadConfig = {
 			positiveSpeechThreshold: serverConfig.vadConfig.positiveSpeechThreshold,
@@ -79,7 +80,8 @@ class AudioHandler {
 			redemptionFrames: serverConfig.vadConfig.redemptionFrames,
 			preSpeechPadFrames: serverConfig.vadConfig.preSpeechPadFrames,
 			minSpeechFrames: serverConfig.vadConfig.minSpeechFrames,
-			frameSamples: 1536  // optional: move to backend if needed
+			frameSamples: 1536,			// optional: move to backend if needed
+			
 		  };
 
 		  console.log('✅ VAD config loaded from server');
