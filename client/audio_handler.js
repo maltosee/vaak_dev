@@ -13,6 +13,7 @@ class AudioHandler {
     this.vadEndDelayMs = 1500; // Default delay
     this.delayTimeoutId = null;
     this.onAudioData = null; // Callback for audio data
+	this.audioMinDurationMs = 0; // Initialize, will be set from server config
     
     console.log('🎵 AudioHandler initialized');
   }
@@ -110,6 +111,16 @@ class AudioHandler {
    */
   async onSpeechEnd(samples) {
     console.log(`🎤 Speech ended - processing ${samples.length} samples`);
+	
+	/**const minDurationMs = this.audioMinDurationMs;
+	const durationMs = (samples.length / this.sampleRate) * 1000;
+	if (durationMs < minDurationMs) {
+	  console.log(`⏱️ Skipping short utterance (${Math.round(durationMs)}ms < ${minDurationMs}ms)`);
+	  this.updateUIState('listening');
+	  return;
+	}**/
+
+	
     
     // Clear any existing delay timeout
     if (this.delayTimeoutId) {

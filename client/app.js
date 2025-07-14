@@ -96,6 +96,30 @@ class SanskritTutorApp {
       this.handleWebSocketMessage(event);
     };
   }
+  
+  
+  // NEW: Add a new handler function for status updates
+  handleStatusUpdateMessage(data) {
+      console.log(`ℹ️ Server Status Update: ${data.message} (Code: ${data.statusCode})`);
+      this.showStatus(data.message, data.statusType || 'info'); // Use statusType for styling
+      // Optionally, you can add more specific UI reactions based on data.statusCode
+      if (data.statusCode === 'BUSY_SERVER') {
+          // Maybe change the voice indicator to red or flashing to indicate "busy"
+          document.getElementById('voice-circle').style.backgroundColor = 'orange'; // Example
+          document.getElementById('voice-status').textContent = data.message;
+      } else if (data.statusCode === 'SHORT_UTTERANCE') {
+          // Revert voice indicator to listening or show a distinct color
+          document.getElementById('voice-circle').style.backgroundColor = ''; // Revert to default
+          document.getElementById('voice-status').textContent = data.message;
+      }
+      // Revert after a short delay for busy/short utterance messages
+      setTimeout(() => {
+          if (this.isListening) { // Only revert if still in listening mode
+            document.getElementById('voice-circle').style.backgroundColor = ''; // Revert
+            document.getElementById('voice-status').textContent = 'Listening...';
+          }
+      }, 3000); // Revert after 3 seconds
+  }
 
   /**
    * Handle incoming WebSocket messages
@@ -133,6 +157,10 @@ class SanskritTutorApp {
             
           case 'pong':
             console.log('🏓 Pong received');
+            break;
+			
+		  case 'status_update': // NEW: Handle status updates from server
+            this.handleStatusUpdateMessage(data);
             break;
             
           default:
