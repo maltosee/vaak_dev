@@ -130,13 +130,13 @@ class AudioHandler {
 		this.lastSpeechEndTime = Date.now(); // Track last speech end timestamp
 	
 		// Now check for barge-in logic
-		  if (audioPlayer && !audioPlayer.paused) {
+		  if (this.audioPlayer && !this.audioPlayer.paused) {
 				const timeSinceLastSpeech = Date.now() - this.lastSpeechEndTime;
 				if (timeSinceLastSpeech < this.bargeInCooldownMs) {
 				  console.log(`🔊 Barge-in blocked - cooldown active (${timeSinceLastSpeech}ms < ${this.bargeInCooldownMs}ms)`);
 				  return;
 				}
-				audioPlayer.pause();
+				this.audioPlayer.pause();
 				console.log(`🔊 Barge-in allowed - stopping current TTS`);
 		  }
 
