@@ -120,6 +120,15 @@ class AudioHandler {
 	  return;
 	}**/
 
+	  // ✅ ADD: Duration filter for nonsense utterances
+     const durationMs = (samples.length / 16000) * 1000; // Assuming 16kHz sample rate
+	  if (durationMs < this.audioMinDurationMs) { // Filter out utterances shorter than 0.5 seconds
+		console.log(`⏱️ Skipping short utterance (${Math.round(durationMs)}ms < 500ms)`);
+		this.isRecording = false;
+		this.updateUIState('listening');
+		return;
+	  }
+
 	
     
     // Clear any existing delay timeout
