@@ -1,6 +1,6 @@
 // Enhanced Audio Handler with VAD delay support
 class AudioHandler {
-  constructor() {
+  constructor(options = {}) {
     this.isRecording = false;
     this.isListening = false;
     this.mediaRecorder = null;
@@ -16,6 +16,7 @@ class AudioHandler {
 	this.audioMinDurationMs = 0; // Initialize, will be set from server config
 	this.lastSpeechEndTime = 0;
 	this.bargeInCooldownMs = 0;
+	this.audioPlayer = options.audioPlayer || new Audio();
     
     console.log('🎵 AudioHandler initialized');
   }
