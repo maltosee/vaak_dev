@@ -68,6 +68,8 @@ class AudioHandler {
 		  }
 
 		  this.vadEndDelayMs = serverConfig.vadEndDelayMs;
+		  this.audioMinDurationMs = parseInt(serverConfig.audioConfig?.minDuration) || 1500;
+
 		  this.vadConfig = {
 			positiveSpeechThreshold: serverConfig.vadConfig.positiveSpeechThreshold,
 			negativeSpeechThreshold: serverConfig.vadConfig.negativeSpeechThreshold,
