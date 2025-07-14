@@ -112,6 +112,16 @@ class AudioHandler {
   async onSpeechEnd(samples) {
     console.log(`🎤 Speech ended - processing ${samples.length} samples`);
 	
+	// ✅ ADD: Check if audio is still playing
+	  const audioPlayer = document.getElementById('audio-player');
+	  if (audioPlayer && !audioPlayer.paused) {
+		console.log(`🔊 Skipping speech - audio still playing`);
+		this.isRecording = false;
+		this.updateUIState('listening');
+		return;
+	  }
+
+	
 	/**const minDurationMs = this.audioMinDurationMs;
 	const durationMs = (samples.length / this.sampleRate) * 1000;
 	if (durationMs < minDurationMs) {

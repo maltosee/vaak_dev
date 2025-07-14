@@ -1,7 +1,7 @@
-// Sanskrit Tutor Backend Server with Dual STT Support
+// Sanskrit Tutor Backend Server with Raw WebSockets
 const express = require('express');
 const http = require('http');
-const socketIo = require('socket.io');
+const WebSocket = require('ws');
 const cors = require('cors');
 const multer = require('multer');
 const path = require('path');
@@ -14,14 +14,16 @@ const pollyTTS = require('./modules/tts');
 const app = express();
 const server = http.createServer(app);
 
-// Configure Socket.IO with CORS
-const io = socketIo(server, {
-  cors: {
-    origin: config.cors.origin,
-    methods: ["GET", "POST"],
-    credentials: config.cors.credentials
-  },
-  maxHttpBufferSize: 10 * 1024 * 1024 // 10MB for audio files
+
+console.log('📦 process.env.MAX_SESSIONS =', process.env.MAX_SESSIONS);  // ⬅️ Add here
+console.log('📦 MAX_SESSIONS from config =', config.session.maxSessions);
+
+
+// Configure WebSocket Server
+const wss = new WebSocket.Server({ 
+  server,
+  perMessageDeflate: false, // Better for audio streaming
+  maxPayload: 10 * 1024 * 1024 // 10MB for audio files
 });
 
 // Middleware
@@ -45,16 +47,40 @@ const upload = multer({
 });
 
 // ──────────────────────────────────────────────────────────────────────────────
-// API Routes
+// API Routes 
 // ──────────────────────────────────────────────────────────────────────────────
+
+// Lightweight health check for Fly.io
+app.get('/health-lite', async (req, res) => {
+  try {
+    const health = await voicePipeline.healthCheck();
+
+    // No logging — just return basic result
+    const status = health?.overall === true ? 200 : 503;
+    res.status(status).send(status === 200 ? 'OK' : 'NOT OK');
+  } catch {
+    res.status(503).send('NOT OK');
+  }
+});
+
+
 
 // Health check endpoint
 app.get('/health', async (req, res) => {
   try {
     const health = await voicePipeline.healthCheck();
-    const status = health.overall ? 200 : 503;
-    res.status(status).json(health);
+    //console.log('🩺 HEALTH CHECK:', JSON.stringify(health, null, 2));
+
+    const status = health?.overall === true ? 200 : 503;
+    //res.status(status).json(health);
+	res.status(status).json({
+		  ok: health.overall,
+		  timestamp: health.timestamp
+		});
+
+	
   } catch (error) {
+    console.error('❌ /health error:', error.message);
     res.status(500).json({
       overall: false,
       error: error.message,
@@ -62,6 +88,8 @@ app.get('/health', async (req, res) => {
     });
   }
 });
+
+
 
 // Configuration endpoint for client settings
 app.get('/config', (req, res) => {
@@ -73,21 +101,14 @@ app.get('/config', (req, res) => {
       channels: config.audio.channels,
       maxDuration: config.audio.maxDuration
     },
+    vadConfig: config.vad, // ✅ Now included from secrets
     timestamp: new Date().toISOString()
   };
-  
+
   console.log('📋 Sending client config:', clientConfig);
   res.json(clientConfig);
 });
 
-// VAD configuration endpoint
-app.get('/vad-config', (req, res) => {
-  res.json({
-    vadEndDelayMs: config.stt.vadEndDelayMs,
-    enableDualSTT: config.stt.enableDualSTT,
-    timestamp: new Date().toISOString()
-  });
-});
 
 // Authentication endpoint
 app.post('/auth', (req, res) => {
@@ -173,14 +194,18 @@ app.post('/upload-audio', upload.single('audio'), async (req, res) => {
 });
 
 // ──────────────────────────────────────────────────────────────────────────────
-// WebSocket Handling
+// WebSocket Handling - Converted to Raw WebSockets
 // ──────────────────────────────────────────────────────────────────────────────
 
-io.on('connection', (socket) => {
-  console.log('🔗 Client connected:', socket.id);
+wss.on('connection', (ws, req) => {
+  const clientId = generateClientId();
+  ws.clientId = clientId;
+  ws.state = 'listening'; // ✅ INITIALIZE STATE
+  
+  console.log('🔗 Client connected:', clientId);
   
   // Send configuration to client immediately
-  socket.emit('message', JSON.stringify({
+  sendMessage(ws, {
     type: 'config',
     vadEndDelayMs: config.stt.vadEndDelayMs,
     enableDualSTT: config.stt.enableDualSTT,
@@ -188,54 +213,101 @@ io.on('connection', (socket) => {
       sampleRate: config.audio.sampleRate,
       channels: config.audio.channels
     }
-  }));
+  });
   
-  socket.emit('message', JSON.stringify({
+  sendMessage(ws, {
     type: 'connected',
     message: 'WebSocket connection established',
     timestamp: new Date().toISOString()
-  }));
+  });
 
-  // Handle audio messages
-  socket.on('message', async (data) => {
+  // Handle messages
+  ws.on('message', async (data) => {
     try {
       if (Buffer.isBuffer(data)) {
-        await handleAudioMessage(data, socket);
-      } else if (typeof data === 'string') {
-        const parsed = JSON.parse(data);
-        await handleTextMessage(parsed, socket);
+        await handleAudioMessage(data, ws);
+      } else {
+        const parsed = JSON.parse(data.toString());
+        await handleTextMessage(parsed, ws);
       }
     } catch (error) {
       console.error('❌ WebSocket message error:', error.message);
-      socket.emit('message', JSON.stringify({
+      sendMessage(ws, {
         type: 'error',
         message: 'Message processing failed'
-      }));
+      });
     }
   });
 
   // Handle disconnection
-  socket.on('disconnect', (reason) => {
-    console.log('🔌 Client disconnected:', socket.id, 'Reason:', reason);
+  ws.on('close', (code, reason) => {
+    console.log('🔌 Client disconnected:', clientId, 'Code:', code, 'Reason:', reason.toString());
     // Clean up any associated sessions
-    sessionManager.cleanupBySocketId(socket.id);
+    sessionManager.cleanupBySocketId(clientId);
   });
 
   // Handle connection errors
-  socket.on('error', (error) => {
-    console.error('❌ Socket error:', error);
+  ws.on('error', (error) => {
+    console.error('❌ WebSocket error:', error);
   });
 });
 
 /**
+ * Generate unique client ID
+ */
+function generateClientId() {
+  return Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+}
+
+/**
+ * Send JSON message to WebSocket client
+ */
+function sendMessage(ws, message) {
+  if (ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify(message));
+  }
+}
+
+/**
+ * Send binary data to WebSocket client
+ */
+function sendBinary(ws, buffer) {
+  if (ws.readyState === WebSocket.OPEN) {
+    ws.send(buffer);
+  }
+}
+
+/**
  * Handle audio message from WebSocket
  * @param {Buffer} audioBuffer - Audio data from client
- * @param {Socket} socket - WebSocket connection
+ * @param {WebSocket} ws - WebSocket connection
  */
-async function handleAudioMessage(audioBuffer, socket) {
-  const userId = socket.handshake.query.userId || socket.id;
+async function handleAudioMessage(audioBuffer, ws) {
+  const userId = ws.clientId;
   
   console.log(`🎤 Received audio: ${audioBuffer.length} bytes from ${userId}`);
+  
+  // ✅ SIMPLE CHECK: Just verify we have a valid client
+  if (!userId) {
+    console.warn(`⚠️ Received audio from client with no ID. Ignoring.`);
+    return;
+  }
+  
+   
+  if (ws.state && ws.state !== 'listening') {
+    console.log(`⚠️ Barge-in attempt detected for ${userId}. Current state: ${ws.state}. . Ignoring audio.`);
+    sendMessage(ws, {
+      type: 'status_update', // New message type for client
+      message: 'Server is currently processing your previous request. Please wait.',
+      statusType: 'warning', // Custom status type for client-side styling
+      statusCode: 'BUSY_SERVER',
+      timestamp: new Date().toISOString()
+    });
+    return; // Important: Stop processing this incoming audio
+  }
+  
+  // ✅ SET STATE TO PROCESSING
+  ws.state = 'processing';
   
   try {
     // Process through pipeline
@@ -254,7 +326,7 @@ async function handleAudioMessage(audioBuffer, socket) {
         };
         
         console.log('🔍 DEBUG: About to send unrecognized language response');
-        socket.emit('message', JSON.stringify(errorResponse));
+        sendMessage(ws, errorResponse);
         console.log('🔍 DEBUG: Unrecognized language response sent');
         
         // Generate and send error audio
@@ -266,7 +338,7 @@ async function handleAudioMessage(audioBuffer, socket) {
         });
         
         if (errorTTS.success) {
-          socket.emit('message', errorTTS.audioBuffer);
+          sendBinary(ws, errorTTS.audioBuffer);
           console.log('🔍 DEBUG: Error audio response sent');
         }
         
@@ -281,49 +353,53 @@ async function handleAudioMessage(audioBuffer, socket) {
         language: pipelineResult.steps.stt.language,
         processingTime: pipelineResult.totalDuration,
         timestamp: pipelineResult.timestamp,
-        debug: config.development.enableDebugLogging ? pipelineResult.steps.stt.debug : undefined
+        //debug: config.development.enableDebugLogging ? pipelineResult.steps.stt.debug : undefined
+		debug: config.enableDebugLogging ? pipelineResult.steps.stt.debug : undefined
       };
       
       console.log('🔍 DEBUG: About to send JSON response');
-      socket.emit('message', JSON.stringify(response));
+      sendMessage(ws, response);
       console.log('🔍 DEBUG: JSON response sent');
       
       // Send audio separately with delay for DataChannel
       await new Promise(resolve => setTimeout(resolve, 200));
-      socket.emit('message', pipelineResult.steps.tts.audioBuffer);
+      sendBinary(ws, pipelineResult.steps.tts.audioBuffer);
       console.log('🔍 DEBUG: Audio response sent');
       
       console.log(`✅ Complete conversation processed for ${userId}`);
       
       // Update session state back to listening
-      sessionManager.updateState(userId, 'listening');
+      //sessionManager.updateState(userId, 'listening');
+	  // ✅ RESET STATE TO LISTENING at the end
+		ws.state = 'listening';
       
     } else {
       // Send error response
-      socket.emit('message', JSON.stringify({
+      sendMessage(ws, {
         type: 'error',
         message: `Pipeline processing failed: ${pipelineResult.error}`,
         timestamp: pipelineResult.timestamp
-      }));
+      });
     }
     
   } catch (error) {
     console.error('❌ Audio processing error:', error);
-    socket.emit('message', JSON.stringify({
+	ws.state = 'listening';
+    sendMessage(ws, {
       type: 'error',
       message: 'Audio processing failed',
       timestamp: new Date().toISOString()
-    }));
+    });
   }
 }
 
 /**
  * Handle text message from WebSocket
  * @param {Object} message - Parsed JSON message
- * @param {Socket} socket - WebSocket connection
+ * @param {WebSocket} ws - WebSocket connection
  */
-async function handleTextMessage(message, socket) {
-  const userId = socket.handshake.query.userId || socket.id;
+async function handleTextMessage(message, ws) {
+  const userId = ws.clientId;
   
   console.log(`💬 Received text message from ${userId}:`, message.type);
   
@@ -334,38 +410,38 @@ async function handleTextMessage(message, socket) {
           const result = await voicePipeline.processTextConversation(message.text, userId);
           
           if (result.success) {
-            socket.emit('message', JSON.stringify({
+            sendMessage(ws, {
               type: 'llm_response',
               text: result.response,
               transcription: result.inputText,
               language: 'text',
               processingTime: result.totalDuration,
               timestamp: result.timestamp
-            }));
+            });
             
             // Send audio if available
             if (result.audioBuffer) {
               await new Promise(resolve => setTimeout(resolve, 200));
-              socket.emit('message', result.audioBuffer);
+              sendBinary(ws, result.audioBuffer);
             }
           } else {
-            socket.emit('message', JSON.stringify({
+            sendMessage(ws, {
               type: 'error',
               message: result.error
-            }));
+            });
           }
         }
         break;
         
       case 'ping':
-        socket.emit('message', JSON.stringify({
+        sendMessage(ws, {
           type: 'pong',
           timestamp: new Date().toISOString()
-        }));
+        });
         break;
         
       case 'get_config':
-        socket.emit('message', JSON.stringify({
+        sendMessage(ws, {
           type: 'config',
           vadEndDelayMs: config.stt.vadEndDelayMs,
           enableDualSTT: config.stt.enableDualSTT,
@@ -373,7 +449,7 @@ async function handleTextMessage(message, socket) {
             sampleRate: config.audio.sampleRate,
             channels: config.audio.channels
           }
-        }));
+        });
         break;
         
       default:
@@ -382,10 +458,10 @@ async function handleTextMessage(message, socket) {
     
   } catch (error) {
     console.error('❌ Text message processing error:', error);
-    socket.emit('message', JSON.stringify({
+    sendMessage(ws, {
       type: 'error',
       message: 'Text message processing failed'
-    }));
+    });
   }
 }
 
@@ -424,13 +500,16 @@ process.on('SIGINT', () => {
 // Server Startup
 // ──────────────────────────────────────────────────────────────────────────────
 
-const PORT = config.server.port;
-const HOST = config.server.host;
+//const PORT = config.server.port;
+//const HOST = config.server.host;
+const PORT = process.env.PORT || 8080;
+const HOST = '0.0.0.0';
+
 
 server.listen(PORT, HOST, async () => {
   console.log('🚀 Sanskrit Tutor Backend Started!');
   console.log(`📡 Server: http://${HOST}:${PORT}`);
-  console.log(`🔌 WebSocket: ws://${HOST}:${PORT}?token=your_token`);
+  console.log(`🔌 WebSocket: ws://${HOST}:${PORT}`);
   console.log(`🏥 Health: http://${HOST}:${PORT}/health`);
   console.log(`📋 Config: http://${HOST}:${PORT}/config`);
   console.log(`🔐 Auth: POST http://${HOST}:${PORT}/auth`);

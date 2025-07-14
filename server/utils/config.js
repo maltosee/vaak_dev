@@ -1,15 +1,30 @@
-// Complete configuration file with dual STT support
 require('dotenv').config();
 
+function getEnvNumber(key, fallback) {
+  const raw = process.env[key];
+  const parsed = Number.parseInt(raw, 10);
+  if (Number.isNaN(parsed)) {
+    console.warn(`⚠️ ${key} is missing or invalid ('${raw}'), using fallback: ${fallback}`);
+    return fallback;
+  }
+  console.log(`✅ ${key} = ${parsed}`);
+  return parsed;
+}
+
+// Optional sanity check for required secrets
+['MAX_SESSIONS', 'SESSION_TIMEOUT', 'SESSION_CLEANUP_INTERVAL'].forEach((key) => {
+  if (!process.env[key]) {
+    console.warn(`⚠️ Missing expected secret: ${key}`);
+  }
+});
+
 module.exports = {
-  // Server configuration
   server: {
     port: process.env.PORT || 8080,
     host: process.env.HOST || '0.0.0.0',
     env: process.env.NODE_ENV || 'development'
   },
 
-  // OpenAI configuration
   openai: {
     apiKey: process.env.OPENAI_API_KEY,
     baseUrl: process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1',
@@ -22,19 +37,26 @@ module.exports = {
       temperature: parseFloat(process.env.WHISPER_TEMPERATURE) || 0,
       responseFormat: process.env.WHISPER_RESPONSE_FORMAT || 'json',
       timeout: parseInt(process.env.WHISPER_TIMEOUT) || 30000,
-      maxFileSize: parseInt(process.env.WHISPER_MAX_FILE_SIZE) || 25 * 1024 * 1024, // 25MB
+      maxFileSize: parseInt(process.env.WHISPER_MAX_FILE_SIZE) || 25 * 1024 * 1024,
       preferredLanguages: ['en', 'hi', 'sa']
     }
   },
+  vad: {
+		  positiveSpeechThreshold: parseFloat(process.env.VAD_POSITIVE_SPEECH_THRESHOLD) || 0.6,
+		  negativeSpeechThreshold: parseFloat(process.env.VAD_NEGATIVE_SPEECH_THRESHOLD) || 0.2,
+		  preSpeechPadFrames: parseInt(process.env.VAD_PRE_SPEECH_PAD_FRAMES) || 10,
+		  minSpeechFrames: parseInt(process.env.VAD_MIN_SPEECH_FRAMES) || 15,
+		  redemptionFrames: parseInt(process.env.VAD_REDEMPTION_FRAMES) || 8
+  },
 
-  // NEW: Dual STT Configuration
   stt: {
     customAsrUrl: process.env.CUSTOM_ASR_URL || 'https://sambhaashanam-asr-1034534632703.us-central1.run.app/transcribe',
     enableDualSTT: process.env.ENABLE_DUAL_STT === 'true',
-    vadEndDelayMs: parseInt(process.env.VAD_END_DELAY_MS) || 1500
+    vadEndDelayMs: getEnvNumber('VAD_END_DELAY_MS', 1500),
+	// Add the new timeout here
+    timeoutMs: parseInt(process.env.STT_TIMEOUT_MS || '180000', 10) // Default to 180s if secret not set
   },
 
-  // AWS configuration
   aws: {
     accessKeyId: process.env.AWS_ACCESS_KEY_ID,
     secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
@@ -44,29 +66,25 @@ module.exports = {
     pollyEngine: process.env.AWS_POLLY_ENGINE || 'neural'
   },
 
-  // Session management
   session: {
-    timeout: parseInt(process.env.SESSION_TIMEOUT) || 10 * 60 * 1000, // 10 minutes
-    maxSessions: parseInt(process.env.MAX_SESSIONS) || 10,
-    cleanupInterval: parseInt(process.env.SESSION_CLEANUP_INTERVAL) || 60 * 1000 // 1 minute
+    maxSessions: getEnvNumber('MAX_SESSIONS', 10),
+    timeout: getEnvNumber('SESSION_TIMEOUT', 10 * 60 * 1000),
+    cleanupInterval: getEnvNumber('SESSION_CLEANUP_INTERVAL', 60 * 1000)
   },
 
-  // Audio processing
   audio: {
-    sampleRate: parseInt(process.env.AUDIO_SAMPLE_RATE) || 16000,
-    channels: parseInt(process.env.AUDIO_CHANNELS) || 1,
-    bitDepth: parseInt(process.env.AUDIO_BIT_DEPTH) || 16,
-    maxDuration: parseInt(process.env.AUDIO_MAX_DURATION) || 30000, // 30 seconds
-    minDuration: parseInt(process.env.AUDIO_MIN_DURATION) || 100 // 100ms
+    sampleRate: getEnvNumber('AUDIO_SAMPLE_RATE', 16000),
+    channels: getEnvNumber('AUDIO_CHANNELS', 1),
+    bitDepth: getEnvNumber('AUDIO_BIT_DEPTH', 16),
+    maxDuration: getEnvNumber('AUDIO_MAX_DURATION', 30000),
+    minDuration: getEnvNumber('AUDIO_MIN_DURATION', 100)
   },
 
-  // CORS configuration
   cors: {
     origin: process.env.CORS_ORIGIN || '*',
     credentials: process.env.CORS_CREDENTIALS === 'true'
   },
 
-  // Logging
   logging: {
     level: process.env.LOG_LEVEL || 'info',
     enableConsole: process.env.ENABLE_CONSOLE_LOG !== 'false',
@@ -74,17 +92,9 @@ module.exports = {
     logDirectory: process.env.LOG_DIRECTORY || './logs'
   },
 
-  // Rate limiting
   rateLimit: {
-    windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000, // 15 minutes
-    maxRequests: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100,
+    windowMs: getEnvNumber('RATE_LIMIT_WINDOW_MS', 15 * 60 * 1000),
+    maxRequests: getEnvNumber('RATE_LIMIT_MAX_REQUESTS', 100),
     skipSuccessfulRequests: process.env.RATE_LIMIT_SKIP_SUCCESS === 'true'
-  },
-
-  // Development settings
-  development: {
-    enableDebugLogging: process.env.ENABLE_DEBUG === 'true',
-    enableHotReload: process.env.ENABLE_HOT_RELOAD === 'true',
-    mockServices: process.env.MOCK_SERVICES === 'true'
   }
 };

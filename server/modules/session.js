@@ -6,13 +6,13 @@ class SessionManager {
   constructor() {
     this.sessions = new Map(); // userId -> session data
     this.connections = new Map(); // userId -> WebSocket connection
-    this.timeoutInterval = config.session.timeoutMinutes * 60 * 1000; // Convert to ms
-    this.maxSessions = config.session.maxConcurrentSessions;
+    this.timeoutInterval = config.session.timeout; // Convert to ms
+    this.maxSessions = config.session.maxSessions;
     
     // Start cleanup interval
     this.startCleanupInterval();
     
-    console.log(`🕐 Session timeout: ${config.session.timeoutMinutes} minutes`);
+    console.log(`🕐 Session timeout: ${this.timeoutInterval} ms`);
     console.log(`👥 Max concurrent sessions: ${this.maxSessions}`);
   }
 

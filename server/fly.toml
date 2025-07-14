@@ -7,24 +7,21 @@ primary_region = "sin"  # Singapore - closest to India
 [env]
   NODE_ENV = "production"
   PORT = "8080"
-
-[http_service]
-  internal_port = 8080
-  force_https = true
-  auto_stop_machines = true
-  auto_start_machines = true
-  min_machines_running = 0
-  max_machines_running = 1
-
-  [http_service.concurrency]
-    type = "connections"
-    hard_limit = 1000
-    soft_limit = 100
+  AUDIO_BIT_DEPTH = "16"
+  AUDIO_MAX_DURATION = "30000"
+  AUDIO_MIN_DURATION = "1500"
+  RATE_LIMIT_WINDOW_MS = "900000"
+  RATE_LIMIT_MAX_REQUESTS = "100"
 
 [[services]]
   protocol = "tcp"
   internal_port = 8080
   processes = ["app"]
+
+  [services.concurrency]
+    type = "connections"
+    hard_limit = 1000
+    soft_limit = 100
 
   [[services.ports]]
     port = 80
@@ -35,6 +32,17 @@ primary_region = "sin"  # Singapore - closest to India
     port = 443
     handlers = ["http", "tls"]
 
+  # Health check for HTTP endpoints
+  [[services.http_checks]]
+    path = "/health-lite"
+    interval = 1200000
+    timeout = 2000
+    grace_period = "5s"
+
 [machine]
   memory = 512
   cpus = 1
+  auto_stop_machines = true
+  auto_start_machines = true
+  min_machines_running = 0
+  max_machines_running = 1

@@ -8,6 +8,7 @@ const config = require('../utils/config');
 class VoicePipeline {
   constructor() {
     this.isInitialized = false;
+	this.lastHealthLogTime = 0; // ✅ ADD THIS LINE
     this.stats = {
       totalProcessed: 0,
       successfulConversations: 0,
@@ -48,7 +49,7 @@ class VoicePipeline {
    * @returns {Object} Complete pipeline result
    */
   async processVoiceConversation(audioBuffer, userId, options = {}) {
-    const startTime = Date.now();
+    const pipelineStart  = Date.now();
     const pipelineId = `${userId}_${Date.now()}`;
     
     try {
@@ -62,7 +63,8 @@ class VoicePipeline {
       sessionManager.updateState(userId, 'processing');
 
       // Step 1: Speech to Text (STT) with Dual STT
-      console.log(`🎙️ Step 1: STT processing...`);
+      const sttStart = Date.now();
+	  console.log(`Phase (STT) Starting transcription...`);
       
       let sttResult;
       if (config.stt.enableDualSTT) {
@@ -84,7 +86,8 @@ class VoicePipeline {
         throw new Error(`STT failed: ${sttResult.error}`);
       }
 
-      console.log(`📝 Transcription: "${sttResult.text}" (Language: ${sttResult.language})`);
+      const sttDuration = Date.now() - sttStart;
+	  console.log(`Phase (STT) {${sttDuration}ms} Transcription: "${sttResult.text}" (${sttResult.language})`);
 
       // Handle unrecognized language
       if (sttResult.text === 'Unrecognized Language' || sttResult.text === '') {
@@ -109,38 +112,41 @@ class VoicePipeline {
             },
             tts: null // Will be handled by special case
           },
-          totalDuration: Date.now() - startTime,
+          totalDuration: Date.now() - pipelineStart,
           timestamp: new Date().toISOString(),
           isUnrecognizedLanguage: true
         };
       }
 
       // Step 2: Language Model (LLM) 
-      console.log(`🤖 Step 2: LLM processing...`);
-      const llmResult = await sanskritGPT.generateSanskritResponse(
-        sttResult.text, 
-        userId, 
-        {
-          detectedLanguage: sttResult.language,
-          audioQuality: this.assessAudioQuality(audioBuffer)
-        }
-      );
+         const llmStart = Date.now();
+	     console.log(`Phase (LLM) Starting response generation...`);
+		 const llmResult = await sanskritGPT.generateSanskritResponse(
+				sttResult.text, 
+				userId, 
+				{
+				  detectedLanguage: sttResult.language,
+				  audioQuality: this.assessAudioQuality(audioBuffer)
+				}
+		);
 
       if (!llmResult.success) {
         throw new Error(`LLM failed: ${llmResult.error}`);
       }
 
-      console.log(`💭 AI Response: "${llmResult.response}"`);
+      const llmDuration = Date.now() - llmStart;
+	  console.log(`Phase (LLM) {${llmDuration}ms} Response generated: "${llmResult.response.substring(0, 50)}..."`);
 
       // Step 3: Text to Speech (TTS)
-      console.log(`🔊 Step 3: TTS processing...`);
+      const ttsStart = Date.now();
+	  console.log(`Phase (TTS) Starting speech synthesis...`);
       const ttsResult = await pollyTTS.synthesizeSpeech(
-        llmResult.response,
-        {
-          voiceId: 'Kajal', // Use bilingual voice
-          languageCode: 'hi-IN', // Hindi base for bilingual
-          engine: 'neural' // Better quality
-        }
+			llmResult.response,
+			{
+			  voiceId: 'Kajal', // Use bilingual voice
+			  languageCode: 'hi-IN', // Hindi base for bilingual
+			  engine: 'neural' // Better quality
+			}
       );
 
       if (!ttsResult.success) {
@@ -148,8 +154,8 @@ class VoicePipeline {
       }
 
       // Calculate total processing time
-      const endTime = Date.now();
-      const totalDuration = endTime - startTime;
+      const ttsDuration = Date.now() - ttsStart;
+	  const totalDuration = Date.now() - pipelineStart;
 
       // Update statistics
       this.updateStats(true, totalDuration);
@@ -186,12 +192,13 @@ class VoicePipeline {
         timestamp: new Date().toISOString()
       };
 
-      console.log(`✅ Pipeline ${pipelineId} completed in ${totalDuration}ms`);
+      console.log(`Phase (TTS) {${ttsDuration}ms} Speech synthesis completed`);
+	  console.log(`✅ Pipeline ${pipelineId} completed in ${totalDuration}ms (STT: ${sttDuration}ms, LLM: ${llmDuration}ms, TTS: ${ttsDuration}ms)`);
       return result;
 
     } catch (error) {
       const endTime = Date.now();
-      const totalDuration = endTime - startTime;
+      const totalDuration = endTime - pipelineStart;
       
       console.error(`❌ Pipeline ${pipelineId} failed: ${error.message}`);
       
@@ -331,25 +338,59 @@ class VoicePipeline {
    * Health check for all pipeline components
    * @returns {Object} Health status
    */
-  async healthCheck() {
-    const health = {
-      pipeline: this.isInitialized,
-      components: {
-        dualSTT: config.stt.enableDualSTT,
-        whisper: true, // Always available (no persistent connection)
-        gpt: true,     // Always available (no persistent connection)
-        tts: true,     // Always available (no persistent connection)
-        sessions: sessionManager.getAllSessions().length < sessionManager.maxSessions
-      },
-      stats: this.getStats(),
-      timestamp: new Date().toISOString()
-    };
+   
+  
+// BEFORE:
+async healthCheck() {
+  console.log('🔍 getAllSessions().length =', sessionManager.getAllSessions().length);
+  console.log('🔍 maxSessions =', sessionManager.maxSessions);
+  
+  const health = {
+    pipeline: this.isInitialized,
+    components: {
+      dualSTT: config.stt.enableDualSTT,
+      whisper: true,
+      gpt: true,
+      tts: true,
+      sessions: sessionManager.getAllSessions().length < sessionManager.maxSessions
+    },
+    stats: this.getStats(),
+    timestamp: new Date().toISOString()
+  };
 
-    const allHealthy = Object.values(health.components).every(status => status === true);
-    health.overall = allHealthy && health.pipeline;
+  const allHealthy = Object.values(health.components).every(status => status === true);
+  health.overall = allHealthy && health.pipeline;
 
-    return health;
-  }
+  return health;
+}
+
+// AFTER:
+	async healthCheck() {
+	  // Only log health checks every 15 minutes
+	  const now = Date.now();
+	  if (!this.lastHealthLogTime || (now - this.lastHealthLogTime) >= 15 * 60 * 1000) {
+		console.log('🩺 Health Check (15min): Sessions:', sessionManager.getAllSessions().length, '/', sessionManager.maxSessions);
+		this.lastHealthLogTime = now;
+	  }
+	  
+	  const health = {
+		pipeline: this.isInitialized,
+		components: {
+		  dualSTT: config.stt.enableDualSTT,
+		  whisper: true,
+		  gpt: true,
+		  tts: true,
+		  sessions: sessionManager.getAllSessions().length < sessionManager.maxSessions
+		},
+		stats: this.getStats(),
+		timestamp: new Date().toISOString()
+	  };
+
+	  const allHealthy = Object.values(health.components).every(status => status === true);
+	  health.overall = allHealthy && health.pipeline;
+
+	  return health;
+	}
 
   /**
    * Reset pipeline statistics

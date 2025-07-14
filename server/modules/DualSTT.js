@@ -116,7 +116,7 @@ class DualSTT {
         headers: {
           ...formData.getHeaders()
         },
-        timeout: 30000 // 30 second timeout
+        timeout: config.stt.timeoutMs // 
       });
 
       const duration = Date.now() - startTime;
@@ -165,7 +165,7 @@ class DualSTT {
           'Authorization': `Bearer ${this.whisperApiKey}`,
           ...formData.getHeaders()
         },
-        timeout: 30000 // 30 second timeout
+        timeout: config.stt.timeoutMs // 30 second timeout
       });
 
       const duration = Date.now() - startTime;
