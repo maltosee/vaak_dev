@@ -1,6 +1,6 @@
 // Enhanced Audio Handler with VAD delay support
 class AudioHandler {
-  constructor(options = {}) {
+  constructor() {
     this.isRecording = false;
     this.isListening = false;
     this.mediaRecorder = null;
@@ -14,9 +14,7 @@ class AudioHandler {
     this.delayTimeoutId = null;
     this.onAudioData = null; // Callback for audio data
 	this.audioMinDurationMs = 0; // Initialize, will be set from server config
-	this.lastSpeechEndTime = 0;
-	//this.bargeInCooldownMs = 0;
-	this.audioPlayer = options.audioPlayer || new Audio();
+	
     
     console.log('🎵 AudioHandler initialized');
   }
@@ -282,20 +280,11 @@ async checkServerReady() {
    * Send audio data to server via callback
    * @param {Blob} audioBlob - Audio data
    */
-	async sendAudioToServer(audioBlob) {
-		  const arrayBuffer = await audioBlob.arrayBuffer();
-		  const uint8Array = new Uint8Array(arrayBuffer);
-
-		  // Check server readiness before sending
-		  const statusCheck = await this.checkServerReady();
-		  if (!statusCheck) {
-			console.warn('⛔ Server busy — skipping audio send to prevent barge-in.');
-			return;
+		sendAudioToServer(audioBlob) {
+		  if (this.onAudioData && typeof this.onAudioData === 'function') {
+			this.onAudioData(audioBlob);
 		  }
-
-		  console.log(`📤 Sending audio to server: ${uint8Array.length} bytes`);
-		  this.socket.send(uint8Array); // or however you send audio
-	}
+		}
 
 
   /**

@@ -22,11 +22,7 @@ class SanskritTutorApp {
     
     try {
       // Initialize audio handler
-      //this.audioHandler = new AudioHandler();
-	  this.audioHandler = new AudioHandler({
-		  audioPlayer: this.audioPlayer,
-		  bargeInCooldownMs: 1000 // or fetch from config if dynamic
-		});
+      this.audioHandler = new AudioHandler();
       this.audioHandler.onAudioData = (audioBlob) => this.sendAudioToServer(audioBlob);
       
       console.log('✅ App initialization completed');
