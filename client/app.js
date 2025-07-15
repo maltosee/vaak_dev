@@ -26,7 +26,9 @@ class SanskritTutorApp {
 		  console.log('🚀 Initializing Sanskrit Tutor App...');
 		  
 		  // Step 1: Fetch /config before anything else
-			const response = await fetch('/config');
+			//const response = await fetch('/config');
+			  const response = await fetch(process.env.NEXT_PUBLIC_CONFIG_URL);
+
 			if (!response.ok) throw new Error(`Failed to fetch config: ${response.status}`);
 			const config = await response.json();
 			this.config = config;
