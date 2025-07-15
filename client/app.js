@@ -142,30 +142,24 @@ class SanskritTutorApp {
  */
 	handleBargeInAttempt() {
 	  if (!this.ttsPlaybackActive) {
-		return true; // No TTS playing, allow speech
+		return false;
 	  }
 
-	  if (this.bargedInAlready) {
-		// Second attempt - always allow and stop TTS
-		console.log('🔊 Second barge-in attempt - stopping TTS and allowing speech');
-		this.stopTTSPlayback();
-		return true;
-	  }
-
-	  // First attempt
 	  if (this.allowBargeInImmediate) {
-		// Immediate barge-in allowed
-		console.log('🔊 Immediate barge-in allowed - stopping TTS');
+		console.log('🔊 Immediate barge-in allowed — stopping TTS');
 		this.stopTTSPlayback();
 		return true;
-	  } else {
-		// Show message and set flag
-		console.log('🔊 First barge-in attempt - showing message');
-		this.bargedInAlready = true;
-		this.showBargeInMessage();
-		return false; // Block this speech
 	  }
+
+	  if (!this.bargedInAlready) {
+		this.bargedInAlready = true;
+		this.showStatusMessage('Sorry, speak clearly again if you want to stop current playback and ask me something?', 'info');
+		console.log('🔊 First barge-in attempt — showing message');
+	  }
+
+	  return false;
 	}
+
 
 	/**
 	 * Stop current TTS playback
@@ -268,7 +262,9 @@ class SanskritTutorApp {
     }
 	
 	// Get barge-in configuration
-	this.allowBargeInImmediate = data.allowBargeTTSPlaybackImmediate || false;	
+	this.allowBargeInImmediate = !!data.allowBargeTTSPlaybackImmediate;
+	console.log('[CONFIG] allowBargeInImmediate set to:', this.allowBargeInImmediate);
+	
     
     // Update UI with configuration
     this.updateConfigDisplay(data);
