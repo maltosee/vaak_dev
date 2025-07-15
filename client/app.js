@@ -28,11 +28,16 @@ class SanskritTutorApp {
 		  // Initialize audio handler
 		  this.audioHandler = new AudioHandler();
 		  this.audioHandler.onAudioData = (audioBlob) => {
+			  
+			 console.log('🔍 DEBUG: onAudioData callback triggered');
+			 console.log('🔍 DEBUG: About to call shouldBlockAudio()');
+			  
 			// Check barge-in BEFORE sending to server
 			if (this.shouldBlockAudio()) {
 			  console.log('🔇 Audio blocked by barge-in logic');
 			  return;
 			}
+			console.log('🔍 DEBUG: shouldBlockAudio returned false - sending to server');
 			this.sendAudioToServer(audioBlob);
 		  };
 		  
