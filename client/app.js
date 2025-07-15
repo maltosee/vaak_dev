@@ -13,7 +13,7 @@ class SanskritTutorApp {
 	// TTS barge-in state
 	this.ttsPlaybackActive = false;
 	this.bargedInAlready = false;
-	this.allowBargeInImmediate = false; // Will be set from config
+	this.allowBargeInImmediate = true; // Will be set from config //hard code for now
 	this.currentAudio = null;
     
     console.log('🕉️ Sanskrit Tutor App initialized');
@@ -331,7 +331,20 @@ class SanskritTutorApp {
     console.log('🎵 Processing audio response...');
     
     try {
-      const audioUrl = URL.createObjectURL(audioBlob);
+       const audioUrl = URL.createObjectURL(audioBlob);
+	  
+	  
+	  // Stop any ongoing TTS playback before starting new one
+		if (this.currentAudio && !this.currentAudio.paused) {
+		  console.log('🛑 Stopping previous TTS playback before starting new one');
+		  this.currentAudio.pause();
+		  this.currentAudio.currentTime = 0;
+		  this.ttsPlaybackActive = false;
+		  this.bargedInAlready = false;
+		  this.currentAudio = null;
+		}
+	  
+	  
       const audio = new Audio(audioUrl);
 	  
 	  // Store reference for potential barge-in
