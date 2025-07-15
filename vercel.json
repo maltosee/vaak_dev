@@ -1,12 +1,10 @@
 {
   "version": 2,
-  "builds": [
-    {
-      "src": "client/**/*",
-      "use": "@vercel/static"
-    }
-  ],
   "rewrites": [
+    {
+      "source": "/api/config",
+      "destination": "/api/config.js"
+    },
     {
       "source": "/(.*)",
       "destination": "/client/$1"
