@@ -333,6 +333,9 @@ class SanskritTutorApp {
     try {
       const audioUrl = URL.createObjectURL(audioBlob);
       const audio = new Audio(audioUrl);
+	  
+	  // Store reference for potential barge-in
+      this.currentAudio = audio;  // ✅ ADD THIS LINE
       
       // Set up audio event handlers
       audio.onloadstart = () => console.log('🎵 Audio loading...');
