@@ -14,6 +14,7 @@ class AudioHandler {
     this.delayTimeoutId = null;
     this.onAudioData = null; // Callback for audio data
 	this.audioMinDurationMs = 0; // Initialize, will be set from server config
+	this.checkBargeIn = null; // Will be set by app
 	
     
     console.log('🎵 AudioHandler initialized');
@@ -100,13 +101,25 @@ class AudioHandler {
   /**
    * Handle speech start event
    */
-  onSpeechStart() {
+  /**onSpeechStart() {
     console.log('🎤 Speech detected - recording started');
     this.isRecording = true;
     
     // Update UI to show recording state
     this.updateUIState('recording');
-  }
+  }**/
+  
+	  onSpeechStart() {
+	  // Check if we should allow this speech (barge-in logic)
+	  if (this.checkBargeIn && !this.checkBargeIn()) {
+		console.log('🔇 Speech blocked by barge-in logic');
+		return; // Don't start recording
+	  }
+
+	  console.log('🎤 Speech detected - recording started');
+	  this.isRecording = true;
+	  this.updateUIState('recording');
+	}
 
   /**
    * Handle speech end event with configurable delay
@@ -241,39 +254,6 @@ class AudioHandler {
     return new Uint8Array(header);
   }
 
-
-async checkServerReady() {
-  return new Promise((resolve) => {
-    const timeout = setTimeout(() => {
-      console.warn('⚠️ No response from server — assuming busy');
-      resolve(false);
-    }, 1000);
-
-    const listener = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        if (data.type === 'status_update') {
-          if (data.statusCode === 'BUSY_SERVER') {
-            clearTimeout(timeout);
-            this.socket.removeEventListener('message', listener);
-            resolve(false);
-          } else {
-            clearTimeout(timeout);
-            this.socket.removeEventListener('message', listener);
-            resolve(true);
-          }
-        }
-      } catch (e) {
-        // ignore non-JSON
-      }
-    };
-
-    this.socket.addEventListener('message', listener);
-
-    // Send a ping asking for readiness
-    this.socket.send(JSON.stringify({ type: 'check_ready' }));
-  });
-}
 
 
   /**

@@ -10,6 +10,11 @@ class SanskritTutorApp {
     this.reconnectAttempts = 0;
     this.maxReconnectAttempts = 5;
     this.reconnectDelay = 1000;
+	// TTS barge-in state
+	this.ttsPlaybackActive = false;
+	this.bargedInAlready = false;
+	this.allowBargeInImmediate = false; // Will be set from config
+	this.currentAudio = null;
     
     console.log('🕉️ Sanskrit Tutor App initialized');
   }
@@ -24,6 +29,8 @@ class SanskritTutorApp {
       // Initialize audio handler
       this.audioHandler = new AudioHandler();
       this.audioHandler.onAudioData = (audioBlob) => this.sendAudioToServer(audioBlob);
+	  // Set up barge-in check function
+	  this.audioHandler.checkBargeIn = () => this.handleBargeInAttempt();
       
       console.log('✅ App initialization completed');
       
@@ -99,6 +106,11 @@ class SanskritTutorApp {
   }
   
   
+  
+  
+  
+  
+  
   // NEW: Add a new handler function for status updates
   handleStatusUpdateMessage(data) {
       console.log(`ℹ️ Server Status Update: ${data.message} (Code: ${data.statusCode})`);
@@ -121,6 +133,61 @@ class SanskritTutorApp {
           }
       }, 3000); // Revert after 3 seconds
   }
+  
+  
+  
+  /**
+ * Handle barge-in attempt during TTS playback
+ * @returns {boolean} true if speech should be allowed, false if blocked
+ */
+	handleBargeInAttempt() {
+	  if (!this.ttsPlaybackActive) {
+		return true; // No TTS playing, allow speech
+	  }
+
+	  if (this.bargedInAlready) {
+		// Second attempt - always allow and stop TTS
+		console.log('🔊 Second barge-in attempt - stopping TTS and allowing speech');
+		this.stopTTSPlayback();
+		return true;
+	  }
+
+	  // First attempt
+	  if (this.allowBargeInImmediate) {
+		// Immediate barge-in allowed
+		console.log('🔊 Immediate barge-in allowed - stopping TTS');
+		this.stopTTSPlayback();
+		return true;
+	  } else {
+		// Show message and set flag
+		console.log('🔊 First barge-in attempt - showing message');
+		this.bargedInAlready = true;
+		this.showBargeInMessage();
+		return false; // Block this speech
+	  }
+	}
+
+	/**
+	 * Stop current TTS playback
+	 */
+	stopTTSPlayback() {
+	  if (this.currentAudio) {
+		this.currentAudio.pause();
+		this.currentAudio.currentTime = 0;
+		this.ttsPlaybackActive = false;
+		this.bargedInAlready = false;
+		this.currentAudio = null;
+	  }
+	}
+
+	/**
+	 * Show barge-in instruction message
+	 */
+	showBargeInMessage() {
+	  this.showStatus('Sorry, speak clearly again if you want to stop current playback and ask me something?', 'info');
+	}
+  
+  
 
   /**
    * Handle incoming WebSocket messages
@@ -199,9 +266,14 @@ class SanskritTutorApp {
     if (data.vadEndDelayMs && this.audioHandler) {
       this.audioHandler.updateVadEndDelay(data.vadEndDelayMs);
     }
+	
+	// Get barge-in configuration
+	this.allowBargeInImmediate = data.allowBargeTTSPlaybackImmediate || false;	
     
     // Update UI with configuration
     this.updateConfigDisplay(data);
+	
+	
   }
 
   /**
@@ -265,12 +337,29 @@ class SanskritTutorApp {
       // Set up audio event handlers
       audio.onloadstart = () => console.log('🎵 Audio loading...');
       audio.oncanplaythrough = () => console.log('🎵 Audio ready to play');
-      audio.onplay = () => console.log('🎵 Audio playback started');
+      /**audio.onplay = () => console.log('🎵 Audio playback started');
       audio.onended = () => {
         console.log('🎵 Audio playback completed');
         URL.revokeObjectURL(audioUrl);
         this.onAudioPlaybackComplete();
-      };
+      };**/
+	  
+	  audio.onplay = () => {
+		  console.log('🎵 Audio playback started');
+		  this.ttsPlaybackActive = true;
+		  this.bargedInAlready = false; // Reset for new TTS
+		  this.currentAudio = audio;
+		};
+	 audio.onended = () => {
+		  console.log('🎵 Audio playback completed');
+		  this.ttsPlaybackActive = false;
+		  this.bargedInAlready = false;
+		  this.currentAudio = null;
+		  URL.revokeObjectURL(audioUrl);
+		  this.onAudioPlaybackComplete();
+	   };
+	  
+	  
       audio.onerror = (error) => {
         console.error('❌ Audio playback error:', error);
         URL.revokeObjectURL(audioUrl);
