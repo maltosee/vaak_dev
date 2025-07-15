@@ -27,7 +27,7 @@ class AudioHandler {
 		  console.log('🔧 Initializing VAD...');
 		  
 		  // Fetch VAD configuration from server
-		  await this.fetchVadConfig();
+		  //await this.fetchVadConfig();
 		  
 		  // Initialize VAD
 		  //const vadModule = await import('https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.7/dist/bundle.min.js');
@@ -46,46 +46,29 @@ class AudioHandler {
       throw error;
     }
   }
+  
+  setConfig(serverConfig) {
+	  if (!serverConfig || !serverConfig.vadConfig) {
+		throw new Error('❌ Invalid config passed to audio handler');
+	  }
 
-  /**
-   * Fetch VAD configuration from server
-   */
-   async fetchVadConfig() {
-		  console.log('📋 Fetching VAD config from server');
-		  //const response = await fetch('/config');
-		  
-		  const baseUrl = window.BACKEND_URL || ''; // default to current origin if not set
-		  const response = await fetch(`${baseUrl}/config`);
+	  this.vadEndDelayMs = serverConfig.vadEndDelayMs;
+	  this.audioMinDurationMs = parseInt(serverConfig.audioConfig?.minDuration) || 1500;
 
-		  
-		  if (!response.ok) {
-			throw new Error(`❌ Failed to fetch /config (status: ${response.status})`);
-		  }
+	  this.vadConfig = {
+		positiveSpeechThreshold: serverConfig.vadConfig.positiveSpeechThreshold,
+		negativeSpeechThreshold: serverConfig.vadConfig.negativeSpeechThreshold,
+		redemptionFrames: serverConfig.vadConfig.redemptionFrames,
+		preSpeechPadFrames: serverConfig.vadConfig.preSpeechPadFrames,
+		minSpeechFrames: serverConfig.vadConfig.minSpeechFrames,
+		frameSamples: 1536,
+	  };
 
-		  const serverConfig = await response.json();
+	  console.log('✅ AudioHandler config set via app.js');
+}
 
-		  // Mandatory: must exist or throw
-		  if (!serverConfig.vadConfig) {
-			throw new Error('❌ Missing vadConfig in server response');
-		  }
 
-		  this.vadEndDelayMs = serverConfig.vadEndDelayMs;
-		  this.audioMinDurationMs = parseInt(serverConfig.audioConfig?.minDuration) || 1500;
-		 // this.bargeInCooldownMs = parseInt(serverConfig.audioConfig?.bargeInCooldownMs) || 20000;
 
-		  this.vadConfig = {
-			positiveSpeechThreshold: serverConfig.vadConfig.positiveSpeechThreshold,
-			negativeSpeechThreshold: serverConfig.vadConfig.negativeSpeechThreshold,
-			redemptionFrames: serverConfig.vadConfig.redemptionFrames,
-			preSpeechPadFrames: serverConfig.vadConfig.preSpeechPadFrames,
-			minSpeechFrames: serverConfig.vadConfig.minSpeechFrames,
-			frameSamples: 1536,			// optional: move to backend if needed
-			
-		  };
-
-		  console.log('✅ VAD config loaded from server');
-		  console.log(`🔧 VAD end delay: ${this.vadEndDelayMs}ms`);
-	}
 
 
   /**

@@ -25,10 +25,18 @@ class SanskritTutorApp {
 	 async initialize() {
 		  console.log('🚀 Initializing Sanskrit Tutor App...');
 		  
+		  // Step 1: Fetch /config before anything else
+			const response = await fetch('/config');
+			if (!response.ok) throw new Error(`Failed to fetch config: ${response.status}`);
+			const config = await response.json();
+			this.config = config;
+			this.allowBargeInImmediate = config.allowBargeTTSPlaybackImmediate === true;
+		  
 		  // Initialize audio handler
-		  this.audioHandler = new AudioHandler();
-		  this.audioHandler.onAudioData = (audioBlob) => {
-			  
+			this.audioHandler = new AudioHandler();
+			this.audioHandler.setConfig(config);
+			this.audioHandler.onAudioData = (audioBlob) => {
+				
 			 console.log('🔍 DEBUG: onAudioData callback triggered');
 			 console.log('🔍 DEBUG: About to call shouldBlockAudio()');
 			  
@@ -204,10 +212,6 @@ shouldBlockAudio() {
             this.handleConnectedMessage(data);
             break;
             
-          case 'config':
-            this.handleConfigMessage(data);
-            break;
-            
           case 'llm_response':
             this.handleLLMResponse(data);
             break;
@@ -248,28 +252,6 @@ shouldBlockAudio() {
     this.showStatus('Connected to Sanskrit Tutor', 'success');
   }
 
-  /**
-   * Handle configuration message from server
-   */
-  handleConfigMessage(data) {
-    console.log('📋 Received server configuration:', data);
-    this.config = data;
-    
-    // Update audio handler with VAD delay
-    if (data.vadEndDelayMs && this.audioHandler) {
-      this.audioHandler.updateVadEndDelay(data.vadEndDelayMs);
-    }
-	
-	// Get barge-in configuration
-	this.allowBargeInImmediate = !!data.allowBargeTTSPlaybackImmediate;
-	console.log('[CONFIG] allowBargeInImmediate set to:', this.allowBargeInImmediate);
-	
-    
-    // Update UI with configuration
-    this.updateConfigDisplay(data);
-	
-	
-  }
 
   /**
    * Handle LLM response with transcript display
