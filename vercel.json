@@ -4,16 +4,24 @@
     {
       "src": "client/**/*",
       "use": "@vercel/static"
+    },
+    {
+      "src": "functions/api/config.js",
+      "use": "@vercel/node"
     }
   ],
   "rewrites": [
+    {
+      "source": "/api/config",
+      "destination": "/functions/api/config.js"
+    },
     {
       "source": "/(.*)",
       "destination": "/client/$1"
     }
   ],
-"functions": {
-    "api/config.js": {
+  "functions": {
+    "functions/api/config.js": {
       "runtime": "nodejs18.x"
     }
   },
