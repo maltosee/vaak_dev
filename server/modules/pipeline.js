@@ -60,7 +60,7 @@ class VoicePipeline {
       }
 
       // Update session state
-      sessionManager.updateState(userId, 'processing');
+      //sessionManager.updateState(userId, 'processing');
 
       // Step 1: Speech to Text (STT) with Dual STT
       const sttStart = Date.now();
@@ -92,7 +92,7 @@ class VoicePipeline {
       // Handle unrecognized language
       if (sttResult.text === 'Unrecognized Language' || sttResult.text === '') {
         // Update session state back to listening
-        sessionManager.updateState(userId, 'listening');
+        //sessionManager.updateState(userId, 'listening');
         
         return {
           success: true,
@@ -161,7 +161,7 @@ class VoicePipeline {
       this.updateStats(true, totalDuration);
 
       // Update session state
-      sessionManager.updateState(userId, 'speaking');
+      //sessionManager.updateState(userId, 'speaking');
 
       const result = {
         success: true,
@@ -206,7 +206,7 @@ class VoicePipeline {
       this.updateStats(false, totalDuration);
       
       // Update session state back to listening
-      sessionManager.updateState(userId, 'listening');
+      //sessionManager.updateState(userId, 'listening');
 
       return {
         success: false,
@@ -233,7 +233,7 @@ class VoicePipeline {
       console.log(`📝 Text Pipeline ${pipelineId} started`);
       
       // Update session state
-      sessionManager.updateState(userId, 'processing');
+      //sessionManager.updateState(userId, 'processing');
 
       // Step 1: LLM Processing
       const llmResult = await sanskritGPT.generateSanskritResponse(text, userId);
@@ -257,7 +257,7 @@ class VoicePipeline {
       const totalDuration = endTime - startTime;
       
       // Update session state
-      sessionManager.updateState(userId, 'speaking');
+      //sessionManager.updateState(userId, 'speaking');
 
       console.log(`✅ Text Pipeline ${pipelineId} completed in ${totalDuration}ms`);
       
@@ -273,7 +273,7 @@ class VoicePipeline {
 
     } catch (error) {
       console.error(`❌ Text Pipeline ${pipelineId} failed: ${error.message}`);
-      sessionManager.updateState(userId, 'listening');
+      //sessionManager.updateState(userId, 'listening');
       
       return {
         success: false,

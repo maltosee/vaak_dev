@@ -99,9 +99,12 @@ app.get('/config', (req, res) => {
     audioConfig: {
       sampleRate: config.audio.sampleRate,
       channels: config.audio.channels,
-      maxDuration: config.audio.maxDuration
+      maxDuration: config.audio.maxDuration,
+	  minDuration: config.audio.minDuration
     },
     vadConfig: config.vad, // ✅ Now included from secrets
+	bargeInCooldownMs: config.audio.bargeInCooldownMs,  // ✅ Add this
+	allowBargeTTSPlaybackImmediate: config.audio.allowBargeTTSPlaybackImmediate,
     timestamp: new Date().toISOString()
   };
 
@@ -109,6 +112,16 @@ app.get('/config', (req, res) => {
   res.json(clientConfig);
 });
 
+// Debug endpoint to see all configuration values
+app.get('/debug-config', (req, res) => {
+  res.json({
+    vadConfig: config.vad,
+    audioConfig: config.audio,
+    sttConfig: config.stt,
+    allConfig: config, // This will show everything
+    timestamp: new Date().toISOString()
+  });
+});
 
 // Authentication endpoint
 app.post('/auth', (req, res) => {
@@ -198,9 +211,19 @@ app.post('/upload-audio', upload.single('audio'), async (req, res) => {
 // ──────────────────────────────────────────────────────────────────────────────
 
 wss.on('connection', (ws, req) => {
+  
   const clientId = generateClientId();
   ws.clientId = clientId;
-  ws.state = 'listening'; // ✅ INITIALIZE STATE
+  
+  // Clean up any sessions with dead WebSocket connections
+ // sessionManager.cleanupDeadConnections();
+  
+  // Create new session
+  const user = { id: clientId, name: `User-${clientId.substring(0, 8)}` };
+  const session = sessionManager.createSession(user,ws); 
+  
+  session.state = 'listening';  // ✅ Use this instead
+
   
   console.log('🔗 Client connected:', clientId);
   
@@ -284,37 +307,33 @@ function sendBinary(ws, buffer) {
  */
 async function handleAudioMessage(audioBuffer, ws) {
   const userId = ws.clientId;
-  
+  const session = sessionManager.getSession(ws.clientId);
+
   console.log(`🎤 Received audio: ${audioBuffer.length} bytes from ${userId}`);
-  
-  // ✅ SIMPLE CHECK: Just verify we have a valid client
+
   if (!userId) {
     console.warn(`⚠️ Received audio from client with no ID. Ignoring.`);
     return;
   }
-  
-   
-  if (ws.state && ws.state !== 'listening') {
-    console.log(`⚠️ Barge-in attempt detected for ${userId}. Current state: ${ws.state}. . Ignoring audio.`);
+
+  if (!session || session.state !== 'listening') {
+    console.log(`⚠️ Barge-in attempt detected for ${userId}. Current state: ${session?.state}. Ignoring audio.`);
     sendMessage(ws, {
-      type: 'status_update', // New message type for client
+      type: 'status_update',
       message: 'Server is currently processing your previous request. Please wait.',
-      statusType: 'warning', // Custom status type for client-side styling
+      statusType: 'warning',
       statusCode: 'BUSY_SERVER',
       timestamp: new Date().toISOString()
     });
-    return; // Important: Stop processing this incoming audio
+    return;
   }
-  
-  // ✅ SET STATE TO PROCESSING
-  ws.state = 'processing';
-  
+
+  session.state = 'processing';
+
   try {
-    // Process through pipeline
     const pipelineResult = await voicePipeline.processVoiceConversation(audioBuffer, userId);
-    
+
     if (pipelineResult.success) {
-      // Handle unrecognized language case
       if (pipelineResult.isUnrecognizedLanguage) {
         const errorResponse = {
           type: 'llm_response',
@@ -324,28 +343,26 @@ async function handleAudioMessage(audioBuffer, ws) {
           processingTime: pipelineResult.totalDuration,
           timestamp: pipelineResult.timestamp
         };
-        
+
         console.log('🔍 DEBUG: About to send unrecognized language response');
         sendMessage(ws, errorResponse);
         console.log('🔍 DEBUG: Unrecognized language response sent');
-        
-        // Generate and send error audio
+
         await new Promise(resolve => setTimeout(resolve, 200));
         const errorTTS = await pollyTTS.synthesizeSpeech(pipelineResult.steps.llm.response, {
           voiceId: 'Kajal',
           languageCode: 'hi-IN',
           engine: 'neural'
         });
-        
+
         if (errorTTS.success) {
           sendBinary(ws, errorTTS.audioBuffer);
           console.log('🔍 DEBUG: Error audio response sent');
         }
-        
+
         return;
       }
-      
-      // Normal successful processing
+
       const response = {
         type: 'llm_response',
         text: pipelineResult.steps.llm.response,
@@ -353,43 +370,35 @@ async function handleAudioMessage(audioBuffer, ws) {
         language: pipelineResult.steps.stt.language,
         processingTime: pipelineResult.totalDuration,
         timestamp: pipelineResult.timestamp,
-        //debug: config.development.enableDebugLogging ? pipelineResult.steps.stt.debug : undefined
-		debug: config.enableDebugLogging ? pipelineResult.steps.stt.debug : undefined
+        debug: config.enableDebugLogging ? pipelineResult.steps.stt.debug : undefined
       };
-      
+
       console.log('🔍 DEBUG: About to send JSON response');
       sendMessage(ws, response);
       console.log('🔍 DEBUG: JSON response sent');
-      
-      // Send audio separately with delay for DataChannel
+
       await new Promise(resolve => setTimeout(resolve, 200));
       sendBinary(ws, pipelineResult.steps.tts.audioBuffer);
       console.log('🔍 DEBUG: Audio response sent');
-      
+
       console.log(`✅ Complete conversation processed for ${userId}`);
-      
-      // Update session state back to listening
-      //sessionManager.updateState(userId, 'listening');
-	  // ✅ RESET STATE TO LISTENING at the end
-		ws.state = 'listening';
-      
     } else {
-      // Send error response
       sendMessage(ws, {
         type: 'error',
         message: `Pipeline processing failed: ${pipelineResult.error}`,
         timestamp: pipelineResult.timestamp
       });
     }
-    
+
   } catch (error) {
     console.error('❌ Audio processing error:', error);
-	ws.state = 'listening';
     sendMessage(ws, {
       type: 'error',
       message: 'Audio processing failed',
       timestamp: new Date().toISOString()
     });
+  } finally {
+    session.state = 'listening'; // ✅ Always reset no matter what
   }
 }
 
@@ -400,6 +409,7 @@ async function handleAudioMessage(audioBuffer, ws) {
  */
 async function handleTextMessage(message, ws) {
   const userId = ws.clientId;
+  const session = sessionManager.getSession(ws.clientId);
   
   console.log(`💬 Received text message from ${userId}:`, message.type);
   
@@ -440,7 +450,22 @@ async function handleTextMessage(message, ws) {
         });
         break;
         
-      case 'get_config':
+      case 'check_ready':
+	  
+		 //const session = sessionManager.getSession(ws.userId);
+		 const sessionForReady = sessionManager.getSession(ws.clientId);
+		 const isReady = sessionForReady?.state === 'listening';
+		 
+		 sendMessage(ws, {
+		  type: 'status_update',
+		  statusCode: isReady ? 'READY' : 'BUSY_SERVER',
+		  message: isReady ? 'Server ready' : 'Server busy',
+		  timestamp: new Date().toISOString()
+		});
+	  
+	    break;
+	  
+	  case 'get_config':
         sendMessage(ws, {
           type: 'config',
           vadEndDelayMs: config.stt.vadEndDelayMs,
@@ -454,6 +479,9 @@ async function handleTextMessage(message, ws) {
         
       default:
         console.log(`⚠️ Unknown message type: ${message.type}`);
+		 // 👇 fallback to session logic for other types
+		//const session = sessionManager.getOrCreateSession(ws.userId, ws);
+		session.handleMessage(message);
     }
     
   } catch (error) {

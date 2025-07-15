@@ -26,10 +26,13 @@ class SessionManager {
     const userId = user.id || uuidv4();
     const sessionId = uuidv4();
     
-    // Check session limit
-    if (this.sessions.size >= this.maxSessions) {
-      throw new Error(`Maximum concurrent sessions (${this.maxSessions}) reached`);
-    }
+	  // Check session limit (but don't count existing session for same user)
+	  const existingSession = this.sessions.get(userId);
+	  const effectiveSessionCount = existingSession ? this.sessions.size : this.sessions.size + 1;
+	  
+	  if (effectiveSessionCount > this.maxSessions) {
+		throw new Error(`Maximum concurrent sessions (${this.maxSessions}) reached`);
+	  }
 
     // Create session data
     const session = {

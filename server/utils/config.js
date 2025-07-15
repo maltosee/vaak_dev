@@ -46,7 +46,8 @@ module.exports = {
 		  negativeSpeechThreshold: parseFloat(process.env.VAD_NEGATIVE_SPEECH_THRESHOLD) || 0.2,
 		  preSpeechPadFrames: parseInt(process.env.VAD_PRE_SPEECH_PAD_FRAMES) || 10,
 		  minSpeechFrames: parseInt(process.env.VAD_MIN_SPEECH_FRAMES) || 15,
-		  redemptionFrames: parseInt(process.env.VAD_REDEMPTION_FRAMES) || 8
+		  redemptionFrames: parseInt(process.env.VAD_REDEMPTION_FRAMES) || 8,
+		  bargeInCooldownMs: parseInt(process.env.BARGE_IN_COOLDOWN_MS || '20000'),
   },
 
   stt: {
@@ -77,7 +78,9 @@ module.exports = {
     channels: getEnvNumber('AUDIO_CHANNELS', 1),
     bitDepth: getEnvNumber('AUDIO_BIT_DEPTH', 16),
     maxDuration: getEnvNumber('AUDIO_MAX_DURATION', 30000),
-    minDuration: getEnvNumber('AUDIO_MIN_DURATION', 100)
+    minDuration: getEnvNumber('AUDIO_MIN_DURATION', 100),
+	bargeInCooldownMs: getEnvNumber('BARGE_IN_COOLDOWN_MS', 20000),  // ✅ Add this
+    allowBargeTTSPlaybackImmediate: process.env.ALLOW_BARGE_TTS_PLAYBACK_IMMEDIATE === 'true' // ✅ Add this
   },
 
   cors: {
