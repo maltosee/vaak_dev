@@ -83,19 +83,18 @@ class SanskritTutorApp {
    * Centralized barge-in decision logic
    * @returns {boolean} true if audio should be blocked
    */
-  shouldBlockAudio() {
-    if (!this.ttsPlaybackActive) {
-      return false; // No TTS playing, allow audio
-    }
-
-    if (this.allowBargeInImmediate) {
-      console.log('🔊 Immediate barge-in - stopping TTS');
-      this.stopTTSPlayback();
-      return false; // Allow audio
-    }
-
-	return true;
-
+shouldBlockAudio() {
+  console.log('🔍 DEBUG: allowBargeInImmediate =', this.allowBargeInImmediate);
+  
+  if (!this.ttsPlaybackActive) {
+    return false;
+  }
+  if (this.allowBargeInImmediate) {
+    console.log('🔊 Immediate barge-in - stopping TTS');
+    this.stopTTSPlayback();
+    return false;
+  }
+  return true;
 }
 
   /**
