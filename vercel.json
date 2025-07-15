@@ -1,10 +1,5 @@
 {
   "version": 2,
-  "functions": {
-    "api/config.js": {
-      "runtime": "vercel-node@18.0.0"
-    }
-  },
   "rewrites": [
     {
       "source": "/api/config",
