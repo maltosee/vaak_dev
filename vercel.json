@@ -12,6 +12,11 @@
       "destination": "/client/$1"
     }
   ],
+"functions": {
+    "api/config.js": {
+      "runtime": "nodejs18.x"
+    }
+  },
   "headers": [
     {
       "source": "/(.*)",
