@@ -14,10 +14,7 @@ class AudioHandler {
     this.delayTimeoutId = null;
     this.onAudioData = null; // Callback for audio data
 	this.audioMinDurationMs = 0; // Initialize, will be set from server config
-	this.checkBargeIn = null; // Will be set by app
-	this.currentAudio = null;
 
-	
     
     console.log('🎵 AudioHandler initialized');
   }
@@ -112,11 +109,12 @@ class AudioHandler {
   }**/
   
 onSpeechStart() {
-  // Check if we should allow this speech (barge-in logic)
-  if (this.checkBargeIn && !this.checkBargeIn()) {
-    console.log('🔇 Speech blocked by barge-in logic');
-    return;
-  }
+	  // Check if we should allow this speech (barge-in logic)
+	 // Simple, clean logic
+    console.log('🎤 Speech detected - recording started');
+    this.isRecording = true;
+    this.updateUIState('recording');
+}
 
   // Stop current TTS if any
   if (this.currentAudio && !this.currentAudio.paused) {
@@ -149,31 +147,28 @@ onSpeechStart() {
 		  }
 		
 		
-		this.lastSpeechEndTime = Date.now(); // Track last speech end timestamp
+		//this.lastSpeechEndTime = Date.now(); // Track last speech end timestamp
 	
 	
-
-	
-    
-    // Clear any existing delay timeout
-    if (this.delayTimeoutId) {
-      clearTimeout(this.delayTimeoutId);
-    }
-    
-    // Update UI to show processing state
-    this.updateUIState('processing');
-    
-    // Add configurable delay before processing
-    console.log(`⏳ Waiting ${this.vadEndDelayMs}ms before sending to server...`);
-    
-    this.delayTimeoutId = setTimeout(async () => {
-      try {
-        await this.processAudioSamples(samples);
-      } catch (error) {
-        console.error('❌ Audio processing error:', error);
-        this.updateUIState('error');
-      }
-    }, this.vadEndDelayMs);
+		// Clear any existing delay timeout
+		if (this.delayTimeoutId) {
+		  clearTimeout(this.delayTimeoutId);
+		}
+		
+		// Update UI to show processing state
+		this.updateUIState('processing');
+		
+		// Add configurable delay before processing
+		console.log(`⏳ Waiting ${this.vadEndDelayMs}ms before sending to server...`);
+		
+		this.delayTimeoutId = setTimeout(async () => {
+		  try {
+			await this.processAudioSamples(samples);
+		  } catch (error) {
+			console.error('❌ Audio processing error:', error);
+			this.updateUIState('error');
+		  }
+		}, this.vadEndDelayMs);
   }
 
   /**

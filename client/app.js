@@ -12,8 +12,8 @@ class SanskritTutorApp {
     this.reconnectDelay = 1000;
 	// TTS barge-in state
 	this.ttsPlaybackActive = false;
-	this.bargedInAlready = false;
-	this.allowBargeInImmediate = true; // Will be set from config //hard code for now
+	//this.bargedInAlready = false;
+	this.allowBargeInImmediate = false; // Will be set from config //hard code for now
 	this.currentAudio = null;
     
     console.log('🕉️ Sanskrit Tutor App initialized');
@@ -26,19 +26,17 @@ class SanskritTutorApp {
     console.log('🚀 Initializing Sanskrit Tutor App...');
     
     try {
-      // Initialize audio handler
-      this.audioHandler = new AudioHandler();
-      this.audioHandler.onAudioData = (audioBlob) => this.sendAudioToServer(audioBlob);
-	  // Set up barge-in check function
-	  this.audioHandler.checkBargeIn = () => this.handleBargeInAttempt();
-      
-      console.log('✅ App initialization completed');
-      
-    } catch (error) {
-      console.error('❌ App initialization failed:', error);
-      this.showError('Failed to initialize application');
-    }
-  }
+		  // Initialize audio handler
+			  this.audioHandler = new AudioHandler();
+			  this.audioHandler.onAudioData = (audioBlob) => {
+			  // Check barge-in BEFORE sending to server
+				  if (this.shouldBlockAudio()) {
+					console.log('🔇 Audio blocked by barge-in logic');
+					return;
+				  }
+				  this.sendAudioToServer(audioBlob);
+			};
+	 }
 
   /**
    * Connect to WebSocket server
@@ -73,6 +71,26 @@ class SanskritTutorApp {
       this.scheduleReconnect();
     }
   }
+  
+  
+   /**
+   * Centralized barge-in decision logic
+   * @returns {boolean} true if audio should be blocked
+   */
+  shouldBlockAudio() {
+    if (!this.ttsPlaybackActive) {
+      return false; // No TTS playing, allow audio
+    }
+
+    if (this.allowBargeInImmediate) {
+      console.log('🔊 Immediate barge-in - stopping TTS');
+      this.stopTTSPlayback();
+      return false; // Allow audio
+    }
+
+	return true;
+
+}
 
   /**
    * Setup WebSocket event handlers
@@ -136,30 +154,6 @@ class SanskritTutorApp {
   
   
   
-  /**
- * Handle barge-in attempt during TTS playback
- * @returns {boolean} true if speech should be allowed, false if blocked
- */
-	handleBargeInAttempt() {
-	  if (!this.ttsPlaybackActive) {
-		return true;
-	  }
-
-	  if (this.allowBargeInImmediate) {
-		console.log('🔊 Immediate barge-in allowed — stopping TTS');
-		this.stopTTSPlayback();
-		return true;
-	  }
-
-	/**  if (!this.bargedInAlready) {
-		this.bargedInAlready = true;
-		this.showStatus('Sorry, speak clearly again if you want to stop current playback and ask me something?', 'info');
-		console.log('🔊 First barge-in attempt — showing message');
-	  } **/
-
-	  return false;
-	}
-
 
 	/**
 	 * Stop current TTS playback
@@ -169,7 +163,7 @@ class SanskritTutorApp {
 		this.currentAudio.pause();
 		this.currentAudio.currentTime = 0;
 		this.ttsPlaybackActive = false;
-		this.bargedInAlready = false;
+		//this.bargedInAlready = false;
 		this.currentAudio = null;
 	  }
 	}
@@ -336,7 +330,7 @@ class SanskritTutorApp {
 		  this.currentAudio.pause();
 		  this.currentAudio.currentTime = 0;
 		  this.ttsPlaybackActive = false;
-		  this.bargedInAlready = false;
+		  //this.bargedInAlready = false;
 		  this.currentAudio = null;
 		}
 	  
@@ -359,13 +353,13 @@ class SanskritTutorApp {
 	  audio.onplay = () => {
 		  console.log('🎵 Audio playback started');
 		  this.ttsPlaybackActive = true;
-		  this.bargedInAlready = false; // Reset for new TTS
+		  //this.bargedInAlready = false; // Reset for new TTS
 		  this.currentAudio = audio;
 		};
 	 audio.onended = () => {
 		  console.log('🎵 Audio playback completed');
 		  this.ttsPlaybackActive = false;
-		  this.bargedInAlready = false;
+		  //this.bargedInAlready = false;
 		  this.currentAudio = null;
 		  URL.revokeObjectURL(audioUrl);
 		  this.onAudioPlaybackComplete();
