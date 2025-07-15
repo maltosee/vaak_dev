@@ -1,15 +1,10 @@
 {
   "version": 2,
-  "builds": [
-    {
-      "src": "client/**/*",
-      "use": "@vercel/static"
-    },
-    {
-      "src": "functions/api/config.js",
-      "use": "@vercel/node"
+  "functions": {
+    "functions/api/config.js": {
+      "runtime": "nodejs18.x"
     }
-  ],
+  },
   "rewrites": [
     {
       "source": "/api/config",
@@ -20,11 +15,6 @@
       "destination": "/client/$1"
     }
   ],
-  "functions": {
-    "functions/api/config.js": {
-      "runtime": "nodejs18.x"
-    }
-  },
   "headers": [
     {
       "source": "/(.*)",
