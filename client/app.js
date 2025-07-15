@@ -22,22 +22,22 @@ class SanskritTutorApp {
   /**
    * Initialize the application
    */
-  async initialize() {
-    console.log('🚀 Initializing Sanskrit Tutor App...');
-    
-    try {
+	 async initialize() {
+		  console.log('🚀 Initializing Sanskrit Tutor App...');
+		  
 		  // Initialize audio handler
-			  this.audioHandler = new AudioHandler();
-			  this.audioHandler.onAudioData = (audioBlob) => {
-			  // Check barge-in BEFORE sending to server
-				  if (this.shouldBlockAudio()) {
-					console.log('🔇 Audio blocked by barge-in logic');
-					return;
-				  }
-				  this.sendAudioToServer(audioBlob);
-			};
-	 }
-  }
+		  this.audioHandler = new AudioHandler();
+		  this.audioHandler.onAudioData = (audioBlob) => {
+			// Check barge-in BEFORE sending to server
+			if (this.shouldBlockAudio()) {
+			  console.log('🔇 Audio blocked by barge-in logic');
+			  return;
+			}
+			this.sendAudioToServer(audioBlob);
+		  };
+		  
+		  console.log('✅ App initialization completed');
+	}
 
   /**
    * Connect to WebSocket server
