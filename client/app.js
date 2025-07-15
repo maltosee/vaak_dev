@@ -142,7 +142,7 @@ class SanskritTutorApp {
  */
 	handleBargeInAttempt() {
 	  if (!this.ttsPlaybackActive) {
-		return false;
+		return true;
 	  }
 
 	  if (this.allowBargeInImmediate) {
@@ -151,11 +151,11 @@ class SanskritTutorApp {
 		return true;
 	  }
 
-	  if (!this.bargedInAlready) {
+	/**  if (!this.bargedInAlready) {
 		this.bargedInAlready = true;
-		this.showStatusMessage('Sorry, speak clearly again if you want to stop current playback and ask me something?', 'info');
+		this.showStatus('Sorry, speak clearly again if you want to stop current playback and ask me something?', 'info');
 		console.log('🔊 First barge-in attempt — showing message');
-	  }
+	  } **/
 
 	  return false;
 	}
