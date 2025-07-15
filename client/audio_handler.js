@@ -114,19 +114,7 @@ onSpeechStart() {
     console.log('🎤 Speech detected - recording started');
     this.isRecording = true;
     this.updateUIState('recording');
-}
 
-  // Stop current TTS if any
-  if (this.currentAudio && !this.currentAudio.paused) {
-    console.log('🛑 Stopping TTS due to barge-in');
-    this.currentAudio.pause();
-    this.currentAudio.currentTime = 0;
-    this.currentAudio = null;
-  }
-
-  console.log('🎤 Speech detected - recording started');
-  this.isRecording = true;
-  this.updateUIState('recording');
 }
 
 

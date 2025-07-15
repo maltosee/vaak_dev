@@ -37,6 +37,7 @@ class SanskritTutorApp {
 				  this.sendAudioToServer(audioBlob);
 			};
 	 }
+  }
 
   /**
    * Connect to WebSocket server
