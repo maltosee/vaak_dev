@@ -27,7 +27,7 @@ class SanskritTutorApp {
 		  
 		  // Step 1: Fetch /config before anything else
 			//const response = await fetch('/config');
-			  const response = await fetch(process.env.NEXT_PUBLIC_CONFIG_URL);
+			  const response = await fetch(window.CONFIG_URL || '/config');
 
 			if (!response.ok) throw new Error(`Failed to fetch config: ${response.status}`);
 			const config = await response.json();
