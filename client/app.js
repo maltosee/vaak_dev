@@ -886,8 +886,18 @@ function setupEventListeners() {
   // ========== DISCONNECT BUTTON ==========
   const disconnectBtn = document.getElementById('disconnect-btn');
   if (disconnectBtn) {
-    disconnectBtn.addEventListener('click', () => {
-      app.stopListening();
+    disconnectBtn.addEventListener('click', async () => {
+ 
+		  await app.stopListening();
+      
+		  // 🔥 ADD: Actually disconnect WebSocket
+		  if (app.ws) {
+			app.ws.close();
+			app.ws = null;
+		  }
+		  app.isConnected = false;
+	  
+	  //app.stopListening();
       document.getElementById('conversation-section').classList.add('hidden');
       document.getElementById('auth-section').classList.remove('hidden');
       document.getElementById('connect-btn').disabled = false;
