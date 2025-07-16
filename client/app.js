@@ -54,7 +54,10 @@ class SanskritTutorApp {
 			// ✅ Add this
 			this.audioHandler.setOnSpeechValidatedCallback(() => {
 			  console.log('🎯 Valid speech detected - interrupting TTS');
-			  this.interruptTTS();
+				   if (this.isSpeaking) {
+						console.log("🛑 Speech validated — interrupting TTS");
+						this.stopTTSPlayback();  // <-- Your existing method to stop audio
+				  }
 			});
 		  
 		  console.log('✅ App initialization completed');
