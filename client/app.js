@@ -93,17 +93,20 @@ class SanskritTutorApp {
    * @returns {boolean} true if audio should be blocked
    */
 shouldBlockAudio() {
-  console.log('🔍 DEBUG: allowBargeInImmediate =', this.allowBargeInImmediate);
-  
-  if (!this.ttsPlaybackActive) {
-    return false;
-  }
-  if (this.allowBargeInImmediate) {
-    console.log('🔊 Immediate barge-in - stopping TTS');
-    this.stopTTSPlayback();
-    return false;
-  }
-  return true;
+	  console.log('🔍 DEBUG: allowBargeInImmediate =', this.allowBargeInImmediate);
+	  
+	  if (!this.ttsPlaybackActive) {
+		return false;
+	  }
+	  if (this.allowBargeInImmediate) {
+		console.log('🔊 Immediate barge-in - stopping TTS');
+		this.stopTTSPlayback();
+		this.showStatus('Stopping current response...', 'info');
+		return false;
+	  }
+	  console.log('🚫 Barge-in not allowed during TTS playback, contact your admin if you really want to stop my playback midway');
+	  this.showStatus('Barge-in not allowed during TTS playback. Contact your admin if you want to interrupt responses.', 'warning');
+	  return true;
 }
 
   /**
