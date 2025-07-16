@@ -248,6 +248,7 @@ ws.on('connection', (ws, req) => {
   ws.on('message', async (data) => {
 	  
 		console.log(`📨 Raw message received: type=${typeof data}, isBuffer=${Buffer.isBuffer(data)}, size=${data.length}`);
+		sessionManager.updateActivity(ws.clientId); // ✅ SINGLE LINE - covers everything
 		
 		try {
 		  if (Buffer.isBuffer(data)) {
@@ -265,27 +266,29 @@ ws.on('connection', (ws, req) => {
 		}
   });
   
-});
-// Handle disconnection - FIXED VERSION
-ws.on('close', (code, reason) => {
-  console.log('🔌 Client disconnected:', clientId, 'Code:', code, 'Reason:', reason.toString());
-  sessionManager.removeSession(clientId);  // Just this!
+	  // Handle disconnection - FIXED VERSION
+	ws.on('close', (code, reason) => {
+	  console.log('🔌 Client disconnected:', clientId, 'Code:', code, 'Reason:', reason.toString());
+	  sessionManager.removeSession(clientId);  // Just this!
+	});
+
+	// Handle connection errors - ALSO ADD THIS
+	ws.on('error', (error) => {
+	  console.error(`❌ WebSocket error for client ${clientId}:`, error.message);
+	  
+	  // Same cleanup as close event
+	  try {
+		const session = sessionManager.getSession(clientId);
+		if (session) {
+		  sessionManager.removeSession(clientId);
+		}
+	  } catch (cleanupError) {
+		console.error(`❌ Error cleanup failed for ${clientId}:`, cleanupError.message);
+	  }
+	});
+  
 });
 
-// Handle connection errors - ALSO ADD THIS
-ws.on('error', (error) => {
-  console.error(`❌ WebSocket error for client ${clientId}:`, error.message);
-  
-  // Same cleanup as close event
-  try {
-    const session = sessionManager.getSession(clientId);
-    if (session) {
-      sessionManager.removeSession(clientId);
-    }
-  } catch (cleanupError) {
-    console.error(`❌ Error cleanup failed for ${clientId}:`, cleanupError.message);
-  }
-});
 
 /**
  * Generate unique client ID

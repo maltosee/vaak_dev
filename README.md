@@ -13,11 +13,15 @@ A real-time Sanskrit tutoring application with voice conversation capabilities u
 
 ## Key Features
 
+## Key Features
+
 - **Real-time Voice Conversations**: WebSocket-based audio streaming
 - **Intelligent Barge-in Control**: Blocks audio during STT/LLM processing, allows during TTS playback
-- **Session State Management**: Tracks conversation state across client-server
+- **Session State Management**: Per-session timeout with activity-based cleanup
 - **Dual Language Support**: Handles Sanskrit, Hindi, and English inputs
+- **Conversation Context**: OpenAI GPT maintains full conversation history per user
 - **Audio Pipeline**: VAD → STT → LLM → TTS with comprehensive error handling
+- **Event-driven Architecture**: Session management via WebSocket events, no background polling
 
 ## Project Structure
 
@@ -58,7 +62,11 @@ sanskrit-tutor/
 
 ## Recent Updates
 
+
 - Fixed WebSocket message handler scoping issue
-- Implemented proper session state management for barge-in control
-- Added comprehensive error handling and cleanup
+- Implemented per-session timeout management with activity-based cleanup
+- Removed background polling in favor of event-driven session management
+- Added comprehensive error handling and proper WebSocket lifecycle management
 - Enhanced audio pipeline with dual STT language detection
+- Confirmed OpenAI conversation context working correctly with history management
+- Optimized VAD settings for better speech detection sensitivity

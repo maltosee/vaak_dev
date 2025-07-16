@@ -10,7 +10,7 @@ class SessionManager {
     this.maxSessions = config.session.maxSessions;
     
     // Start cleanup interval
-    this.startCleanupInterval();
+    //this.startCleanupInterval();
     
     console.log(`🕐 Session timeout: ${this.timeoutInterval} ms`);
     console.log(`👥 Max concurrent sessions: ${this.maxSessions}`);
@@ -23,37 +23,45 @@ class SessionManager {
    * @returns {Object} Session info
    */
   createSession(user, ws) {
-    const userId = user.id || uuidv4();
-    const sessionId = uuidv4();
-    
-	  // Check session limit (but don't count existing session for same user)
-	  const existingSession = this.sessions.get(userId);
-	  const effectiveSessionCount = existingSession ? this.sessions.size : this.sessions.size + 1;
-	  
-	  if (effectiveSessionCount > this.maxSessions) {
-		throw new Error(`Maximum concurrent sessions (${this.maxSessions}) reached`);
-	  }
+		const userId = user.id || uuidv4();
+		const sessionId = uuidv4();
+		
+		  // Check session limit (but don't count existing session for same user)
+		  const existingSession = this.sessions.get(userId);
+		  const effectiveSessionCount = existingSession ? this.sessions.size : this.sessions.size + 1;
+		  
+		  if (effectiveSessionCount > this.maxSessions) {
+			throw new Error(`Maximum concurrent sessions (${this.maxSessions}) reached`);
+		  }
 
-    // Create session data
-    const session = {
-      sessionId,
-      userId,
-      user,
-      createdAt: new Date(),
-      lastActivity: new Date(),
-      status: 'connected',
-      audioBuffer: null,
-      state: 'listening' // listening, processing, speaking
-    };
+		// Create session data
+		const session = {
+		  sessionId,
+		  userId,
+		  user,
+		  createdAt: new Date(),
+		  lastActivity: new Date(),
+		  status: 'connected',
+		  audioBuffer: null,
+		  state: 'listening' // listening, processing, speaking
+		};
 
-    // Store session and connection
-    this.sessions.set(userId, session);
-    this.connections.set(userId, ws);
+		// Store session and connection
+		this.sessions.set(userId, session);
+		this.connections.set(userId, ws);
 
-    console.log(`🔗 Session created: ${sessionId} for user: ${user.name || userId}`);
-    console.log(`📊 Active sessions: ${this.sessions.size}/${this.maxSessions}`);
+		console.log(`🔗 Session created: ${sessionId} for user: ${user.name || userId}`);
+		console.log(`📊 Active sessions: ${this.sessions.size}/${this.maxSessions}`);
+		
+		// Set inactivity timeout for this session
+		const timeoutHandle = setTimeout(() => {
+		  console.log(`⏰ Session ${sessionId} timed out due to inactivity`);
+		  this.removeSession(userId, 'inactivity_timeout');
+		}, this.timeoutInterval);
 
-    return session;
+		session.timeoutHandle = timeoutHandle; // ✅ ADD THIS LINE
+
+		return session;
   }
 
   /**
@@ -74,6 +82,20 @@ class SessionManager {
     if (session) {
       session.lastActivity = new Date();
     }
+	
+	// Reset the timeout - clear old one and set new one
+    if (session.timeoutHandle) {
+      clearTimeout(session.timeoutHandle);
+    }
+	
+	const timeoutHandle = setTimeout(() => {
+      console.log(`⏰ Session ${session.sessionId} timed out due to inactivity`);
+      this.removeSession(userId, 'inactivity_timeout');
+    }, this.timeoutInterval);
+    
+    session.timeoutHandle = timeoutHandle;
+  
+  
   }
 
   /**
@@ -124,6 +146,11 @@ class SessionManager {
     if (session) {
       console.log(`🔌 Session removed: ${session.sessionId} (${reason})`);
     }
+	
+	// Clear timeout if exists
+    if (session?.timeoutHandle) {
+		clearTimeout(session.timeoutHandle); // ✅ ADD THIS LINE
+    }
 
     // Close WebSocket if still open
     if (ws && ws.readyState === ws.OPEN) {
@@ -156,35 +183,7 @@ class SessionManager {
     return timeDiff > this.timeoutInterval;
   }
 
-  /**
-   * Start cleanup interval for expired sessions
-   */
-  startCleanupInterval() {
-    setInterval(() => {
-      this.cleanupExpiredSessions();
-    }, 60000); // Check every minute
-  }
 
-  /**
-   * Remove expired sessions
-   */
-  cleanupExpiredSessions() {
-    const expiredSessions = [];
-    
-    this.sessions.forEach((session, userId) => {
-      if (this.isSessionExpired(session)) {
-        expiredSessions.push(userId);
-      }
-    });
-
-    expiredSessions.forEach(userId => {
-      this.removeSession(userId, 'session_timeout');
-    });
-
-    if (expiredSessions.length > 0) {
-      console.log(`🧹 Cleaned up ${expiredSessions.length} expired sessions`);
-    }
-  }
 
   /**
    * Get session statistics
