@@ -108,6 +108,12 @@ onSpeechStart() {
   async onSpeechEnd(samples) {
 		console.log(`🎤 Speech ended - processing ${samples.length} samples`);
 		
+		 // ✅ Barge-in TTS before duration check
+		  if (this.onSpeechValidatedCallback) {
+			this.onSpeechValidatedCallback();
+		  }
+		
+		
 		  // ✅ ADD: Duration filter for nonsense utterances
 		  const durationMs = (samples.length / 16000) * 1000; // Assuming 16kHz sample rate
 		  if (durationMs < this.audioMinDurationMs) { // Filter out utterances shorter than 0.5 seconds
@@ -415,6 +421,11 @@ onSpeechStart() {
       audioSupported: this.isAudioSupported()
     };
   }
+  
+  setOnSpeechValidatedCallback(callback) {
+	this.onSpeechValidatedCallback = callback;
+	}
+
 
   /**
    * Cleanup resources
