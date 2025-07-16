@@ -211,6 +211,8 @@ shouldBlockAudio() {
         switch (data.type) {
           case 'connected':
             this.handleConnectedMessage(data);
+			this.isConnected=true
+			console.log('✅ Server connection confirmed');
             break;
             
           case 'llm_response':
