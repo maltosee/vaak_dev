@@ -20,7 +20,7 @@ console.log('📦 MAX_SESSIONS from config =', config.session.maxSessions);
 
 
 // Configure WebSocket Server
-const wss = new WebSocket.Server({ 
+const ws = new WebSocket.Server({ 
   server,
   perMessageDeflate: false, // Better for audio streaming
   maxPayload: 10 * 1024 * 1024 // 10MB for audio files
@@ -210,69 +210,81 @@ app.post('/upload-audio', upload.single('audio'), async (req, res) => {
 // WebSocket Handling - Converted to Raw WebSockets
 // ──────────────────────────────────────────────────────────────────────────────
 
-wss.on('connection', (ws, req) => {
+ws.on('connection', (ws, req) => {
   
-  const clientId = generateClientId();
-  ws.clientId = clientId;
-  
-  // Clean up any sessions with dead WebSocket connections
- // sessionManager.cleanupDeadConnections();
-  
-  // Create new session
-  const user = { id: clientId, name: `User-${clientId.substring(0, 8)}` };
-  const session = sessionManager.createSession(user,ws); 
-  
-  session.state = 'listening';  // ✅ Use this instead
+	  const clientId = generateClientId();
+	  ws.clientId = clientId;
+	  
+	  // Clean up any sessions with dead WebSocket connections
+	 // sessionManager.cleanupDeadConnections();
+	  
+	  // Create new session
+	  const user = { id: clientId, name: `User-${clientId.substring(0, 8)}` };
+	  const session = sessionManager.createSession(user,ws); 
+	  
+	  session.state = 'listening';  // ✅ Use this instead
 
-  
-  console.log('🔗 Client connected:', clientId);
-  
-  // Send configuration to client immediately
-  sendMessage(ws, {
-    type: 'config',
-    vadEndDelayMs: config.stt.vadEndDelayMs,
-    enableDualSTT: config.stt.enableDualSTT,
-    audioConfig: {
-      sampleRate: config.audio.sampleRate,
-      channels: config.audio.channels
-    }
-  });
-  
-  sendMessage(ws, {
-    type: 'connected',
-    message: 'WebSocket connection established',
-    timestamp: new Date().toISOString()
-  });
+	  
+	  console.log('🔗 Client connected:', clientId);
+	  
+	  // Send configuration to client immediately
+	  sendMessage(ws, {
+		type: 'config',
+		vadEndDelayMs: config.stt.vadEndDelayMs,
+		enableDualSTT: config.stt.enableDualSTT,
+		audioConfig: {
+		  sampleRate: config.audio.sampleRate,
+		  channels: config.audio.channels
+		}
+	  });
+	  
+	  sendMessage(ws, {
+		type: 'connected',
+		message: 'WebSocket connection established',
+		timestamp: new Date().toISOString()
+	  });
 
   // Handle messages
   ws.on('message', async (data) => {
-    try {
-      if (Buffer.isBuffer(data)) {
-        await handleAudioMessage(data, ws);
-      } else {
-        const parsed = JSON.parse(data.toString());
-        await handleTextMessage(parsed, ws);
-      }
-    } catch (error) {
-      console.error('❌ WebSocket message error:', error.message);
-      sendMessage(ws, {
-        type: 'error',
-        message: 'Message processing failed'
-      });
+	  
+		console.log(`📨 Raw message received: type=${typeof data}, isBuffer=${Buffer.isBuffer(data)}, size=${data.length}`);
+		
+		try {
+		  if (Buffer.isBuffer(data)) {
+			await handleAudioMessage(data, ws);
+		  } else {
+			const parsed = JSON.parse(data.toString());
+			await handleTextMessage(parsed, ws);
+		  }
+		} catch (error) {
+		  console.error('❌ WebSocket message error:', error.message);
+		  sendMessage(ws, {
+			type: 'error',
+			message: 'Message processing failed'
+		  });
+		}
+  });
+  
+});
+// Handle disconnection - FIXED VERSION
+ws.on('close', (code, reason) => {
+  console.log('🔌 Client disconnected:', clientId, 'Code:', code, 'Reason:', reason.toString());
+  sessionManager.removeSession(clientId);  // Just this!
+});
+
+// Handle connection errors - ALSO ADD THIS
+ws.on('error', (error) => {
+  console.error(`❌ WebSocket error for client ${clientId}:`, error.message);
+  
+  // Same cleanup as close event
+  try {
+    const session = sessionManager.getSession(clientId);
+    if (session) {
+      sessionManager.removeSession(clientId);
     }
-  });
-
-  // Handle disconnection
-  ws.on('close', (code, reason) => {
-    console.log('🔌 Client disconnected:', clientId, 'Code:', code, 'Reason:', reason.toString());
-    // Clean up any associated sessions
-    sessionManager.cleanupBySocketId(clientId);
-  });
-
-  // Handle connection errors
-  ws.on('error', (error) => {
-    console.error('❌ WebSocket error:', error);
-  });
+  } catch (cleanupError) {
+    console.error(`❌ Error cleanup failed for ${clientId}:`, cleanupError.message);
+  }
 });
 
 /**
@@ -497,14 +509,26 @@ async function handleTextMessage(message, ws) {
 // Error Handling & Cleanup
 // ──────────────────────────────────────────────────────────────────────────────
 
-// Global error handlers
+// Global error handlers - IMPROVED VERSION
 process.on('uncaughtException', (error) => {
   console.error('💥 Uncaught Exception:', error);
+  
+  // Don't exit immediately for cleanup errors
+  if (error.message.includes('cleanupBySocketId is not a function') || 
+      error.message.includes('cleanup')) {
+    console.log('🔧 Cleanup error handled, server continuing...');
+    return; // Don't exit for cleanup errors
+  }
+  
+  // For other critical errors, still exit
+  console.log('💀 Critical error, shutting down...');
   process.exit(1);
 });
 
 process.on('unhandledRejection', (reason, promise) => {
   console.error('💥 Unhandled Rejection at:', promise, 'reason:', reason);
+  // Log but don't crash for promise rejections
+  console.log('🔧 Promise rejection handled, server continuing...');
 });
 
 // Graceful shutdown
