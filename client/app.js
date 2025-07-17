@@ -389,9 +389,14 @@ shouldBlockAudio() {
    */
   onAudioPlaybackComplete() {
     // Re-enable listening after audio playback
-    if (this.isListening && this.audioHandler) {
+    if (this.isListening && this.audioHandler  && this.audioHandler.isListening) {
       console.log('🎤 Re-enabling speech detection after audio playback');
+	  // Add the missing restart code:
+	  this.audioHandler.startListening();
     }
+	else {
+    console.log('🔇 Not restarting - user manually stopped listening');
+	}
   }
 
   /**

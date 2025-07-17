@@ -27,28 +27,26 @@ class LanguageDetector {
     console.log(`🔍 Language Detection - Custom: "${customClean}", Whisper: "${whisperClean}"`);
     
     // Exact same prompt as Python version
-    const prompt = `
-Analyze these speech recognition outputs and identify the actual language:
+	
+	const prompt = `
+Given two transcripts of a user's spoken sentence, identify the **primary language of the sentence** — not based on a few individual words, but based on the **structure and overall intent** of the speech.
 
 Transcript 1 (Custom STT): "${customClean}"
 Transcript 2 (Whisper STT): "${whisperClean}"
 
-Step 1: Check Transcript 1 for meaningful content:
-- If it contains real Hindi words like "मुझे", "कुछ", "नहीं", "आता", "है" etc. → "Hindi"
-- If it contains real Sanskrit words like "अहम्", "त्वम्", "गच्छामि", "नमस्ते" etc. → "Sanskrit"  
-- If it's transliterated English like "हइस्टेन्", "बेंगलोर्", "आइ स्पीक्" → Go to Step 2
+Guidelines:
 
-Step 2: If Transcript 1 is transliterated English, check Transcript 2:
-- If clear English → "English"
+1. If the **sentence structure and grammar** are English — even if it includes Sanskrit words like "yatra", "pratyaya", "shabda" — classify as **English**.
+   - Example: "Help me with yatra pratyaya" → English
 
-Step 3: If unclear → "Unrecognized"
+2. If the structure is clearly Hindi (contains real Hindi verbs or grammar like "मुझे आता है", "क्या आप", etc.) → classify as **Hindi**
 
-Current analysis:
-- Transcript 1: "${customClean}"
-- Is this real Hindi/Sanskrit vocabulary or transliterated English?
+3. If the entire sentence is in Sanskrit grammar (e.g., "अहं गच्छामि", "त्वम् पठसि", or full Devanagari Sanskrit phrases) → classify as **Sanskrit**
 
-Respond with ONLY: Sanskrit | Hindi | English | Unrecognized
-`;
+4. If neither transcript is meaningful or recognizable → **Unrecognized**
+
+Respond with only one of:
+Sanskrit | Hindi | English | Unrecognized `;
 
     try {
       const response = await axios.post(this.apiUrl, {
