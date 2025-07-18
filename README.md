@@ -70,3 +70,7 @@ sanskrit-tutor/
 - Enhanced audio pipeline with dual STT language detection
 - Confirmed OpenAI conversation context working correctly with history management
 - Optimized VAD settings for better speech detection sensitivity
+
+
+## Updates on 18th Jul 2025
+-- Fixed prompt in langdetector.js to support mixed mode sentences beginning with English .
