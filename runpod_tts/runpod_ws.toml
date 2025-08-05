@@ -2,7 +2,7 @@
 name = "sanskrit-vaak-ws"
 
 [build]
-dockerfile = "Dockerfile"
+dockerfile = "Dockerfile_ws"
 
 [resources]
 cpu = 2
