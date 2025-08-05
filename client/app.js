@@ -1,91 +1,128 @@
-// Sanskrit Tutor App with Dual STT and Transcript Display
+// Sanskrit Tutor App with RunPod TTS Integration
 class SanskritTutorApp {
   constructor() {
-    this.ws = null;
+    this.ws = null; // Fly.io WebSocket
     this.audioHandler = null;
-	this.audioPlayer = new Audio(); // ✅ add this
+    this.runpodTTS = null; // ADD RunPod TTS Manager
+    this.audioPlayer = new Audio();
     this.isConnected = false;
     this.isListening = false;
     this.config = null;
     this.reconnectAttempts = 0;
     this.maxReconnectAttempts = 5;
     this.reconnectDelay = 1000;
-	// TTS barge-in state
-	this.ttsPlaybackActive = false;
-	//this.bargedInAlready = false;
-	this.allowBargeInImmediate = false; // Will be set from config //hard code for now
-	this.currentAudio = null;
     
-    console.log('🕉️ Sanskrit Tutor App initialized');
+    // ADD CLIENT ID:
+    this.clientId = `client_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    
+    // TTS barge-in state
+    this.ttsPlaybackActive = false;
+    this.allowBargeInImmediate = false;
+    this.currentAudio = null;
+    
+    console.log(`🕉️ Sanskrit Tutor App initialized with client ID: ${this.clientId}`);
   }
 
   /**
    * Initialize the application
    */
-	 async initialize() {
-		  console.log('🚀 Initializing Sanskrit Tutor App...');
-		  
-		  // Step 1: Fetch /config before anything else
-			const response = await fetch('/api/config');
-			 
-			if (!response.ok) throw new Error(`Failed to fetch config: ${response.status}`);
-			const config = await response.json();
-			this.config = config;
-			this.allowBargeInImmediate = config.allowBargeTTSPlaybackImmediate === true;
-		  
-		  // Initialize audio handler
-			this.audioHandler = new AudioHandler();
-			this.audioHandler.setConfig(config);
-			this.audioHandler.onAudioData = (audioBlob) => {
-				
-				/** console.log('🔍 DEBUG: onAudioData callback triggered');
-				 console.log('🔍 DEBUG: About to call shouldBlockAudio()');
-				  
-				// Check barge-in BEFORE sending to server
-				if (this.shouldBlockAudio()) {
-				  console.log('🔇 Audio blocked by barge-in logic');
-				  return;
-				}
-				console.log('🔍 DEBUG: shouldBlockAudio returned false - sending to server');**/
-				this.sendAudioToServer(audioBlob);
-		    };
-			
-			
-			// ✅ Add this
-			this.audioHandler.setOnSpeechValidatedCallback(() => {
-			  console.log('🎯 Valid speech detected - interrupting TTS');
-				   if (this.ttsPlaybackActive && this.allowBargeInImmediate ) {
-						console.log("🛑 Speech validated — interrupting TTS");
-						this.stopTTSPlayback();  // <-- Your existing method to stop audio
-				  }
-			});
-		  
-		  console.log('✅ App initialization completed');
-	}
+  async initialize() {
+    console.log('🚀 Initializing Sanskrit Tutor App...');
+    
+    // Step 1: Fetch /config before anything else
+    const response = await fetch('/api/config');
+    if (!response.ok) throw new Error(`Failed to fetch config: ${response.status}`);
+    
+    const config = await response.json();
+    this.config = config;
+    this.allowBargeInImmediate = config.allowBargeTTSPlaybackImmediate === true;
+    
+    // Step 2: Initialize audio handler
+    this.audioHandler = new AudioHandler();
+    this.audioHandler.setConfig(config);
+    this.audioHandler.onAudioData = (audioBlob) => {
+      this.sendAudioToServer(audioBlob);
+    };
+    
+    this.audioHandler.setOnSpeechValidatedCallback(() => {
+      console.log('🎯 Valid speech detected - checking for TTS interruption');
+      if (this.ttsPlaybackActive && this.allowBargeInImmediate) {
+        console.log("🛑 Speech validated — interrupting TTS");
+        this.stopTTSPlayback();
+      }
+    });
+    
+    // Step 3: Initialize RunPod TTS Manager
+    this.runpodTTS = new RunPodTTSManager(this.clientId);
+    
+    // Set up RunPod TTS callbacks
+    this.runpodTTS.onStreamStart = (streamInfo) => {
+      console.log(`🎵 TTS Stream starting: ${streamInfo.estimatedDuration}s`);
+      this.ttsPlaybackActive = true;
+    };
+    
+    this.runpodTTS.onAudioReady = (audioElement) => {
+      console.log('🎵 TTS Audio ready for playback');
+      this.currentAudio = audioElement;
+      
+      // Set up audio event handlers
+      audioElement.onended = () => {
+        console.log('🎵 TTS Audio playback completed');
+        this.ttsPlaybackActive = false;
+        this.currentAudio = null;
+        this.onAudioPlaybackComplete();
+      };
+    };
+    
+    this.runpodTTS.onStreamComplete = (data) => {
+      console.log(`✅ TTS Stream completed: ${data.total_chunks} chunks`);
+    };
+    
+    this.runpodTTS.onError = (error) => {
+      console.error('❌ RunPod TTS error:', error);
+      this.showError('TTS service error: ' + error.error);
+      this.ttsPlaybackActive = false;
+      this.currentAudio = null;
+    };
+    
+    console.log('✅ App initialization completed');
+  }
 
   /**
    * Connect to WebSocket server
    */
   async connect() {
     try {
-      //const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      //const wsUrl = `${protocol}//${window.location.host}`;
-      
-	  const wsUrl = CONFIG.getWebSocketURL();
-      console.log('🔌 Connecting to WebSocket:', wsUrl);
+      const wsUrl = this.config.websocketUrl;
+      console.log('🔌 Connecting to Fly.io WebSocket:', wsUrl);
       
       this.ws = new WebSocket(wsUrl);
       this.setupWebSocketHandlers();
       
-      // Wait for connection
+      // Wait for Fly.io connection
       await new Promise((resolve, reject) => {
         this.ws.onopen = resolve;
         this.ws.onerror = reject;
-        setTimeout(() => reject(new Error('Connection timeout')), 10000);
+        setTimeout(() => reject(new Error('Fly.io connection timeout')), 10000);
       });
       
       // Initialize audio after successful connection
       await this.initializeAudio();
+      
+      // Initialize RunPod TTS connection
+      if (this.config.runpod && this.config.runpod.websocketUrl) {
+        try {
+          await this.runpodTTS.initialize({
+            runpodWsUrl: this.config.runpod.websocketUrl,
+            streamingThreshold: this.config.tts?.streamingThreshold || 6.0,
+            bufferPercentage: this.config.tts?.bufferPercentage || 0.3,
+            chunkDuration: this.config.tts?.chunkDuration || 0.5
+          });
+        } catch (error) {
+          console.warn('⚠️ RunPod TTS initialization failed:', error.message);
+          this.showStatus('TTS service unavailable - will retry on first use', 'warning');
+        }
+      }
       
       console.log('✅ Connected successfully');
       this.showStatus('Connected to Sanskrit Tutor', 'success');
@@ -97,41 +134,40 @@ class SanskritTutorApp {
     }
   }
   
-  
-   /**
+  /**
    * Centralized barge-in decision logic
    * @returns {boolean} true if audio should be blocked
    */
-shouldBlockAudio() {
-	  console.log('🔍 DEBUG: allowBargeInImmediate =', this.allowBargeInImmediate);
-	  
-	  if (!this.ttsPlaybackActive) {
-		return false;
-	  }
-	  if (this.allowBargeInImmediate) {
-		console.log('🔊 Immediate barge-in - stopping TTS');
-		this.stopTTSPlayback();
-		this.showStatus('Stopping current response...', 'info');
-		return false;
-	  }
-	  console.log('🚫 Barge-in not allowed during TTS playback, contact your admin if you really want to stop my playback midway');
-	  this.showStatus('Barge-in not allowed during TTS playback. Contact your admin if you want to interrupt responses.', 'warning');
-	  return true;
-}
+  shouldBlockAudio() {
+    console.log('🔍 DEBUG: allowBargeInImmediate =', this.allowBargeInImmediate);
+    
+    if (!this.ttsPlaybackActive) {
+      return false;
+    }
+    if (this.allowBargeInImmediate) {
+      console.log('🔊 Immediate barge-in - stopping TTS');
+      this.stopTTSPlayback();
+      this.showStatus('Stopping current response...', 'info');
+      return false;
+    }
+    console.log('🚫 Barge-in not allowed during TTS playback, contact your admin if you really want to stop my playback midway');
+    this.showStatus('Barge-in not allowed during TTS playback. Contact your admin if you want to interrupt responses.', 'warning');
+    return true;
+  }
 
   /**
    * Setup WebSocket event handlers
    */
   setupWebSocketHandlers() {
     this.ws.onopen = () => {
-      console.log('🔌 WebSocket connected');
+      console.log('🔌 Fly.io WebSocket connected');
       this.isConnected = true;
       this.reconnectAttempts = 0;
       this.updateConnectionStatus(true);
     };
 
     this.ws.onclose = (event) => {
-      console.log('🔌 WebSocket disconnected:', event.code, event.reason);
+      console.log('🔌 Fly.io WebSocket disconnected:', event.code, event.reason);
       this.isConnected = false;
       this.updateConnectionStatus(false);
       
@@ -141,7 +177,7 @@ shouldBlockAudio() {
     };
 
     this.ws.onerror = (error) => {
-      console.error('❌ WebSocket error:', error);
+      console.error('❌ Fly.io WebSocket error:', error);
       this.showError('Connection error occurred');
     };
 
@@ -149,67 +185,62 @@ shouldBlockAudio() {
       this.handleWebSocketMessage(event);
     };
   }
-  
-  
-  
-  
-  
-  
-  
-  // NEW: Add a new handler function for status updates
-  handleStatusUpdateMessage(data) {
-      console.log(`ℹ️ Server Status Update: ${data.message} (Code: ${data.statusCode})`);
-      this.showStatus(data.message, data.statusType || 'info'); // Use statusType for styling
-      // Optionally, you can add more specific UI reactions based on data.statusCode
-      if (data.statusCode === 'BUSY_SERVER') {
-          // Maybe change the voice indicator to red or flashing to indicate "busy"
-          document.getElementById('voice-circle').style.backgroundColor = 'orange'; // Example
-          document.getElementById('voice-status').textContent = data.message;
-      } else if (data.statusCode === 'SHORT_UTTERANCE') {
-          // Revert voice indicator to listening or show a distinct color
-          document.getElementById('voice-circle').style.backgroundColor = ''; // Revert to default
-          document.getElementById('voice-status').textContent = data.message;
-      }
-      // Revert after a short delay for busy/short utterance messages
-      setTimeout(() => {
-          if (this.isListening) { // Only revert if still in listening mode
-            document.getElementById('voice-circle').style.backgroundColor = ''; // Revert
-            document.getElementById('voice-status').textContent = 'Listening...';
-          }
-      }, 3000); // Revert after 3 seconds
-  }
-  
-  
-  
-
-	/**
-	 * Stop current TTS playback
-	 */
-	stopTTSPlayback() {
-	  if (this.currentAudio) {
-		this.currentAudio.pause();
-		this.currentAudio.currentTime = 0;
-		this.ttsPlaybackActive = false;
-		//this.bargedInAlready = false;
-		this.currentAudio = null;
-	  }
-	}
-
-	/**
-	 * Show barge-in instruction message
-	 */
-	showBargeInMessage() {
-	  this.showStatus('Sorry, speak clearly again if you want to stop current playback and ask me something?', 'info');
-	}
-  
-  
 
   /**
-   * Handle incoming WebSocket messages
+   * Handle status update message
+   */
+  handleStatusUpdateMessage(data) {
+    console.log(`ℹ️ Fly.io Status Update: ${data.message} (Code: ${data.statusCode})`);
+    this.showStatus(data.message, data.statusType || 'info');
+    
+    if (data.statusCode === 'BUSY_SERVER') {
+      document.getElementById('voice-circle').style.backgroundColor = 'orange';
+      document.getElementById('voice-status').textContent = data.message;
+    } else if (data.statusCode === 'SHORT_UTTERANCE') {
+      document.getElementById('voice-circle').style.backgroundColor = '';
+      document.getElementById('voice-status').textContent = data.message;
+    }
+    
+    setTimeout(() => {
+      if (this.isListening) {
+        document.getElementById('voice-circle').style.backgroundColor = '';
+        document.getElementById('voice-status').textContent = 'Listening...';
+      }
+    }, 3000);
+  }
+
+  /**
+   * Stop current TTS playback
+   */
+  stopTTSPlayback() {
+    // Stop RunPod TTS playback
+    if (this.runpodTTS) {
+      this.runpodTTS.stopCurrentPlayback();
+    }
+    
+    // Legacy audio handling
+    if (this.currentAudio) {
+      this.currentAudio.pause();
+      this.currentAudio.currentTime = 0;
+      this.currentAudio = null;
+    }
+    
+    this.ttsPlaybackActive = false;
+    console.log('🛑 TTS playback stopped');
+  }
+
+  /**
+   * Show barge-in instruction message
+   */
+  showBargeInMessage() {
+    this.showStatus('Sorry, speak clearly again if you want to stop current playback and ask me something?', 'info');
+  }
+
+  /**
+   * Handle incoming WebSocket messages from Fly.io
    */
   handleWebSocketMessage(event) {
     try {
-      // Debug logging
       console.log('🔍 DEBUG: Raw message received:', typeof event.data);
       console.log('🔍 DEBUG: Is ArrayBuffer?', event.data instanceof ArrayBuffer);
       console.log('🔍 DEBUG: Is Blob?', event.data instanceof Blob);
@@ -219,17 +250,22 @@ shouldBlockAudio() {
       
       if (typeof event.data === 'string') {
         const data = JSON.parse(event.data);
-        console.log('📨 Received message:', data.type);
+        console.log('📨 Received from Fly.io:', data.type);
         
         switch (data.type) {
           case 'connected':
             this.handleConnectedMessage(data);
-			this.isConnected=true
-			console.log('✅ Server connection confirmed');
+            this.isConnected = true;
+            console.log('✅ Fly.io connection confirmed');
             break;
             
           case 'llm_response':
             this.handleLLMResponse(data);
+            break;
+            
+          // ADD NEW CASE:
+          case 'tts_initiated':
+            this.handleTTSInitiated(data);
             break;
             
           case 'error':
@@ -237,15 +273,15 @@ shouldBlockAudio() {
             break;
             
           case 'pong':
-            console.log('🏓 Pong received');
+            console.log('🏓 Pong received from Fly.io');
             break;
-			
-		  case 'status_update': // NEW: Handle status updates from server
+            
+          case 'status_update':
             this.handleStatusUpdateMessage(data);
             break;
             
           default:
-            console.log(`⚠️ Unknown message type: ${data.type}`);
+            console.log(`⚠️ Unknown Fly.io message type: ${data.type}`);
         }
         
       } else if (event.data instanceof Blob) {
@@ -255,7 +291,7 @@ shouldBlockAudio() {
       }
       
     } catch (error) {
-      console.error('❌ Message handling error:', error);
+      console.error('❌ Fly.io message handling error:', error);
       this.showError('Failed to process server response');
     }
   }
@@ -264,10 +300,9 @@ shouldBlockAudio() {
    * Handle connected message from server
    */
   handleConnectedMessage(data) {
-    console.log('✅ Server connection confirmed');
+    console.log('✅ Fly.io connection confirmed');
     this.showStatus('Connected to Sanskrit Tutor', 'success');
   }
-
 
   /**
    * Handle LLM response with transcript display
@@ -280,7 +315,7 @@ shouldBlockAudio() {
       this.displayUserTranscript(data.transcription, data.language || 'unknown');
     }
     
-    // Then display AI response
+    // Display AI response
     this.displayAIResponse(data.text);
     
     // Show processing time if available
@@ -293,21 +328,42 @@ shouldBlockAudio() {
     if (data.debug && this.config?.enableDebugLogging) {
       console.log('🐛 Debug info:', data.debug);
     }
+    
+    // The TTS will be handled separately via RunPod streaming
+  }
+
+  /**
+   * Handle TTS initiation notification from Fly.io
+   */
+  handleTTSInitiated(data) {
+    console.log('🎵 TTS initiated by Fly.io:', data);
+    
+    // Ensure RunPod TTS connection is active
+    this.runpodTTS.checkAndReconnect();
+    
+    // Show status
+    this.showStatus('Generating speech response...', 'info');
+    
+    // Update UI to show TTS is starting
+    const statusElement = document.getElementById('tts-status');
+    if (statusElement) {
+      statusElement.textContent = `🎵 Generating ${data.estimatedDuration?.toFixed(1) || '?'}s of speech...`;
+    }
   }
 
   /**
    * Handle error message from server
    */
   handleErrorMessage(data) {
-    console.error('❌ Server error:', data.message);
+    console.error('❌ Fly.io error:', data.message);
     this.showError(data.message);
   }
 
   /**
-   * Handle audio response from server
+   * Handle audio response from server (LEGACY - for fallback)
    */
   async handleAudioResponse(audioBlob) {
-    console.log(`🔊 Received audio response (Blob): ${audioBlob.size} bytes`);
+    console.log(`🔊 Received legacy audio response (Blob): ${audioBlob.size} bytes`);
     
     try {
       await this.playAudioResponse(audioBlob);
@@ -318,57 +374,44 @@ shouldBlockAudio() {
   }
 
   /**
-   * Play audio response from server
+   * Play audio response from server (LEGACY - for fallback)
    */
   async playAudioResponse(audioBlob) {
-    console.log('🎵 Processing audio response...');
+    console.log('🎵 Processing legacy audio response...');
     
     try {
-       const audioUrl = URL.createObjectURL(audioBlob);
-	  
-	  
-	  // Stop any ongoing TTS playback before starting new one
-		if (this.currentAudio && !this.currentAudio.paused) {
-		  console.log('🛑 Stopping previous TTS playback before starting new one');
-		  this.currentAudio.pause();
-		  this.currentAudio.currentTime = 0;
-		  this.ttsPlaybackActive = false;
-		  //this.bargedInAlready = false;
-		  this.currentAudio = null;
-		}
-	  
-	  
+      const audioUrl = URL.createObjectURL(audioBlob);
+      
+      // Stop any ongoing TTS playback before starting new one
+      if (this.currentAudio && !this.currentAudio.paused) {
+        console.log('🛑 Stopping previous TTS playback before starting new one');
+        this.currentAudio.pause();
+        this.currentAudio.currentTime = 0;
+        this.ttsPlaybackActive = false;
+        this.currentAudio = null;
+      }
+      
       const audio = new Audio(audioUrl);
-	  
-	  // Store reference for potential barge-in
-      this.currentAudio = audio;  // ✅ ADD THIS LINE
+      this.currentAudio = audio;
       
       // Set up audio event handlers
       audio.onloadstart = () => console.log('🎵 Audio loading...');
       audio.oncanplaythrough = () => console.log('🎵 Audio ready to play');
-      /**audio.onplay = () => console.log('🎵 Audio playback started');
+      
+      audio.onplay = () => {
+        console.log('🎵 Audio playback started');
+        this.ttsPlaybackActive = true;
+        this.currentAudio = audio;
+      };
+      
       audio.onended = () => {
         console.log('🎵 Audio playback completed');
+        this.ttsPlaybackActive = false;
+        this.currentAudio = null;
         URL.revokeObjectURL(audioUrl);
         this.onAudioPlaybackComplete();
-      };**/
-	  
-	  audio.onplay = () => {
-		  console.log('🎵 Audio playback started');
-		  this.ttsPlaybackActive = true;
-		  //this.bargedInAlready = false; // Reset for new TTS
-		  this.currentAudio = audio;
-		};
-	 audio.onended = () => {
-		  console.log('🎵 Audio playback completed');
-		  this.ttsPlaybackActive = false;
-		  //this.bargedInAlready = false;
-		  this.currentAudio = null;
-		  URL.revokeObjectURL(audioUrl);
-		  this.onAudioPlaybackComplete();
-	   };
-	  
-	  
+      };
+      
       audio.onerror = (error) => {
         console.error('❌ Audio playback error:', error);
         URL.revokeObjectURL(audioUrl);
@@ -389,14 +432,12 @@ shouldBlockAudio() {
    */
   onAudioPlaybackComplete() {
     // Re-enable listening after audio playback
-    if (this.isListening && this.audioHandler  && this.audioHandler.isListening) {
+    if (this.isListening && this.audioHandler && this.audioHandler.isListening) {
       console.log('🎤 Re-enabling speech detection after audio playback');
-	  // Add the missing restart code:
-	  this.audioHandler.startListening();
+      this.audioHandler.startListening();
+    } else {
+      console.log('🔇 Not restarting - user manually stopped listening');
     }
-	else {
-    console.log('🔇 Not restarting - user manually stopped listening');
-	}
   }
 
   /**
@@ -512,6 +553,9 @@ shouldBlockAudio() {
         throw new Error('Audio handler not initialized');
       }
       
+      // Ensure RunPod TTS connection is ready
+      await this.runpodTTS.checkAndReconnect();
+      
       console.log('🎤 Starting speech detection...');
       await this.audioHandler.startListening();
       this.isListening = true;
@@ -546,36 +590,33 @@ shouldBlockAudio() {
   }
 
   /**
-   * Send audio data to server
+   * Send audio data to Fly.io server
    */
   sendAudioToServer(audioBlob) {
-    
-	console.log('🔍 DEBUG sendAudio: isConnected =', this.isConnected);
+    console.log('🔍 DEBUG sendAudio: isConnected =', this.isConnected);
     console.log('🔍 DEBUG sendAudio: ws =', this.ws);
     console.log('🔍 DEBUG sendAudio: ws.readyState =', this.ws?.readyState);
-	
-	// Check actual WebSocket state instead of isConnected flag
-	  if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-		console.error('❌ Cannot send audio: WebSocket not connected');
-		console.log('🔍 DEBUG: ws =', this.ws);
-		console.log('🔍 DEBUG: readyState =', this.ws?.readyState);
-		return;
-	  }
     
-    console.log(`📤 Sending audio to server: ${audioBlob.size} bytes`);
+    // Check actual WebSocket state
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      console.error('❌ Cannot send audio: Fly.io WebSocket not connected');
+      return;
+    }
+    
+    console.log(`📤 Sending audio to Fly.io: ${audioBlob.size} bytes`);
     this.ws.send(audioBlob);
   }
 
   /**
-   * Send text message to server
+   * Send text message to Fly.io server
    */
   sendTextMessage(message) {
     if (!this.isConnected || !this.ws) {
-      console.error('❌ Cannot send message: WebSocket not connected');
+      console.error('❌ Cannot send message: Fly.io WebSocket not connected');
       return;
     }
     
-    console.log('📤 Sending text message:', message);
+    console.log('📤 Sending text message to Fly.io:', message);
     this.ws.send(JSON.stringify(message));
   }
 
@@ -623,29 +664,6 @@ shouldBlockAudio() {
       
       audioStatus.textContent = statusText[status] || status;
       audioStatus.className = `audio-status ${status}`;
-    }
-  }
-
-  /**
-   * Update configuration display
-   */
-  updateConfigDisplay(config) {
-    const configElement = document.getElementById('config-display');
-    if (configElement) {
-      configElement.innerHTML = `
-        <div class="config-item">
-          <span class="label">Dual STT:</span>
-          <span class="value">${config.enableDualSTT ? '✅ Enabled' : '❌ Disabled'}</span>
-        </div>
-        <div class="config-item">
-          <span class="label">VAD Delay:</span>
-          <span class="value">${config.vadEndDelayMs}ms</span>
-        </div>
-        <div class="config-item">
-          <span class="label">Sample Rate:</span>
-          <span class="value">${config.audioConfig?.sampleRate || 16000}Hz</span>
-        </div>
-      `;
     }
   }
 
@@ -698,7 +716,7 @@ shouldBlockAudio() {
     }
     
     this.reconnectAttempts++;
-    const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1); // Exponential backoff
+    const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1);
     
     console.log(`🔄 Scheduling reconnection attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts} in ${delay}ms`);
     this.showStatus(`Reconnecting in ${delay/1000}s... (${this.reconnectAttempts}/${this.maxReconnectAttempts})`, 'warning');
@@ -728,9 +746,14 @@ shouldBlockAudio() {
   handleTextInput(text) {
     if (!text.trim()) return;
     
+    // Ensure RunPod TTS connection for response
+    this.runpodTTS.checkAndReconnect();
+    
+    // ADD CLIENT ID TO MESSAGE:
     this.sendTextMessage({
       type: 'text_input',
-      text: text.trim()
+      text: text.trim(),
+      client_id: this.clientId
     });
     
     // Clear input
@@ -748,15 +771,17 @@ shouldBlockAudio() {
   }
 
   /**
-   * Get application status
+   * Get application status including RunPod TTS
    */
   getStatus() {
     return {
       isConnected: this.isConnected,
       isListening: this.isListening,
       audioHandler: this.audioHandler?.getStatus(),
+      runpodTTS: this.runpodTTS?.getStatus(),
       config: this.config,
-      reconnectAttempts: this.reconnectAttempts
+      reconnectAttempts: this.reconnectAttempts,
+      clientId: this.clientId
     };
   }
 
@@ -771,6 +796,11 @@ shouldBlockAudio() {
       
       if (this.audioHandler) {
         await this.audioHandler.cleanup();
+      }
+      
+      // ADD RUNPOD CLEANUP:
+      if (this.runpodTTS) {
+        this.runpodTTS.cleanup();
       }
       
       if (this.ws) {
@@ -796,7 +826,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   try {
     app = new SanskritTutorApp();
     await app.initialize();
-    //await app.connect();
     
     // Setup event listeners
     setupEventListeners();
@@ -807,45 +836,40 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 // Setup UI event listeners
-// Setup UI event listeners
 function setupEventListeners() {
-  // ========== CONNECT BUTTON - This was missing! ==========
-	  const connectBtn = document.getElementById('connect-btn');
-	  if (connectBtn) {
-					connectBtn.addEventListener('click', async () => {
-							
-						  console.log('🔍 DEBUG: app.isConnected =', app.isConnected);
-						  console.log('🔍 DEBUG: app.ws =', app.ws);
-						  console.log('🔍 DEBUG: app.ws.readyState =', app.ws?.readyState);
-						
-						  const name = document.getElementById('name').value.trim();
-						  const apiKey = document.getElementById('apiKey').value.trim();
-						  
-						  if (!name || !apiKey) {
-							app.showError('Please enter both name and API key');
-							return;
-						  }
-						   // Store user info
-							app.userName = name;
-							app.apiKey = apiKey;
-						  
-						  // Show connecting status
-						  document.getElementById('auth-status').textContent = 'Connecting...';
-						  connectBtn.disabled = true;
-						  
-						  try {
-								// FIXED CODE:
-									// Always connect (since we're not auto-connecting anymore)
-									  await app.connect();
-									  showConversationSection(name);
-								} 
-						   catch (error) {
-								document.getElementById('auth-status').textContent = 'Connection failed';
-								connectBtn.disabled = false;
-						  }
-				});
-	  }
-}
+  // ========== CONNECT BUTTON ==========
+  const connectBtn = document.getElementById('connect-btn');
+  if (connectBtn) {
+    connectBtn.addEventListener('click', async () => {
+      console.log('🔍 DEBUG: app.isConnected =', app.isConnected);
+      console.log('🔍 DEBUG: app.ws =', app.ws);
+      console.log('🔍 DEBUG: app.ws.readyState =', app.ws?.readyState);
+    
+      const name = document.getElementById('name').value.trim();
+      const apiKey = document.getElementById('apiKey').value.trim();
+      
+      if (!name || !apiKey) {
+        app.showError('Please enter both name and API key');
+        return;
+      }
+      
+      // Store user info
+      app.userName = name;
+      app.apiKey = apiKey;
+      
+      // Show connecting status
+      document.getElementById('auth-status').textContent = 'Connecting...';
+      connectBtn.disabled = true;
+      
+      try {
+        await app.connect();
+        showConversationSection(name);
+      } catch (error) {
+        document.getElementById('auth-status').textContent = 'Connection failed';
+        connectBtn.disabled = false;
+      }
+    });
+  }
   
   // Helper function to transition to conversation screen
   function showConversationSection(userName) {
@@ -892,17 +916,15 @@ function setupEventListeners() {
   const disconnectBtn = document.getElementById('disconnect-btn');
   if (disconnectBtn) {
     disconnectBtn.addEventListener('click', async () => {
- 
-		  await app.stopListening();
+      await app.stopListening();
       
-		  // 🔥 ADD: Actually disconnect WebSocket
-		  if (app.ws) {
-			app.ws.close();
-			app.ws = null;
-		  }
-		  app.isConnected = false;
-	  
-	  //app.stopListening();
+      // Actually disconnect WebSocket
+      if (app.ws) {
+        app.ws.close();
+        app.ws = null;
+      }
+      app.isConnected = false;
+  
       document.getElementById('conversation-section').classList.add('hidden');
       document.getElementById('auth-section').classList.remove('hidden');
       document.getElementById('connect-btn').disabled = false;
@@ -910,14 +932,12 @@ function setupEventListeners() {
     });
   }
 
-  // ========== EXISTING CODE (keep as is) ==========
-  // Microphone button
+  // ========== EXISTING CODE ==========
   const micButton = document.getElementById('mic-button');
   if (micButton) {
     micButton.addEventListener('click', () => app.handleMicrophoneToggle());
   }
   
-  // Text input
   const textInput = document.getElementById('text-input');
   const sendButton = document.getElementById('send-button');
   
@@ -934,7 +954,6 @@ function setupEventListeners() {
     });
   }
   
-  // Clear chat button
   const clearButton = document.getElementById('clear-chat');
   if (clearButton) {
     clearButton.addEventListener('click', () => {
@@ -945,12 +964,11 @@ function setupEventListeners() {
     });
   }
   
-  // Ping button (for testing)
   const pingButton = document.getElementById('ping-button');
   if (pingButton) {
     pingButton.addEventListener('click', () => app.sendPing());
   }
-
+}
 
 // Handle page unload
 window.addEventListener('beforeunload', () => {
@@ -962,10 +980,8 @@ window.addEventListener('beforeunload', () => {
 // Handle page visibility changes
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
-    // Page is hidden, optionally pause listening
     console.log('📱 Page hidden');
   } else {
-    // Page is visible again
     console.log('📱 Page visible');
   }
 });

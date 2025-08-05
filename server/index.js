@@ -105,6 +105,7 @@ app.get('/config', (req, res) => {
     vadConfig: config.vad, // ✅ Now included from secrets
 	bargeInCooldownMs: config.audio.bargeInCooldownMs,  // ✅ Add this
 	allowBargeTTSPlaybackImmediate: config.audio.allowBargeTTSPlaybackImmediate,
+	streamingTTS: config.streamingTTS,  // ← ADD THIS LINE
     timestamp: new Date().toISOString()
   };
 
