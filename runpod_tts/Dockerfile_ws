@@ -1,0 +1,14 @@
+# Use a lightweight Python base image
+FROM python:3.10-slim-bookworm
+
+# Set the working directory
+WORKDIR /app
+
+# Clone your repository and install dependencies
+# This command clones the repo and installs packages from the requirements.txt file
+# inside the runpod_tts subdirectory.
+RUN git clone https://github.com/maltosee/vaak_dev.git . && \
+    pip install --no-cache-dir -r runpod_tts/requirements.txt
+
+# Set the command to start your FastAPI app with Uvicorn
+CMD ["uvicorn", "runpod_ws_service:app", "--host", "0.0.0.0", "--port", "8000"]
