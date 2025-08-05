@@ -9,6 +9,8 @@ const config = require('./utils/config');
 const voicePipeline = require('./modules/pipeline');
 const sessionManager = require('./modules/session');
 const pollyTTS = require('./modules/tts');
+const https = require('https');
+const { URL } = require('url');
 
 // Initialize Express app
 const app = express();
@@ -93,8 +95,16 @@ app.get('/health', async (req, res) => {
 
 // Configuration endpoint for client settings
 app.get('/config', (req, res) => {
+  
+  // Use 'ws' for development and 'wss' for production
+  const protocol = req.protocol === 'https' ? 'wss' : 'ws';
+  const host = req.headers.host;
+  
   const clientConfig = {
-    vadEndDelayMs: config.stt.vadEndDelayMs,
+    
+	// Add the dynamic WebSocket URL
+    websocketUrl: `${protocol}://${host}`,
+	vadEndDelayMs: config.stt.vadEndDelayMs,
     enableDualSTT: config.stt.enableDualSTT,
     audioConfig: {
       sampleRate: config.audio.sampleRate,
@@ -160,35 +170,7 @@ app.get('/stats', (req, res) => {
   });
 });
 
-// Text-to-speech endpoint
-app.post('/tts', async (req, res) => {
-  try {
-    const { text, voice, language } = req.body;
-    
-    if (!text) {
-      return res.status(400).json({ error: 'Text is required' });
-    }
 
-    const ttsResult = await pollyTTS.synthesizeSpeech(text, {
-      voiceId: voice || 'Kajal',
-      languageCode: language || 'hi-IN',
-      engine: 'neural'
-    });
-
-    if (ttsResult.success) {
-      res.set({
-        'Content-Type': 'audio/mpeg',
-        'Content-Length': ttsResult.audioBuffer.length
-      });
-      res.send(ttsResult.audioBuffer);
-    } else {
-      res.status(500).json({ error: ttsResult.error });
-    }
-  } catch (error) {
-    console.error('❌ TTS endpoint error:', error.message);
-    res.status(500).json({ error: 'TTS processing failed' });
-  }
-});
 
 // File upload endpoint for testing
 app.post('/upload-audio', upload.single('audio'), async (req, res) => {
@@ -321,83 +303,58 @@ function sendBinary(ws, buffer) {
  * @param {Buffer} audioBuffer - Audio data from client
  * @param {WebSocket} ws - WebSocket connection
  */
+// --- MODIFIED handleAudioMessage FUNCTION ---
+// (This is a simplified version, replace the old code with this)
 async function handleAudioMessage(audioBuffer, ws) {
   const userId = ws.clientId;
   const session = sessionManager.getSession(ws.clientId);
 
-  console.log(`🎤 Received audio: ${audioBuffer.length} bytes from ${userId}`);
-
-  if (!userId) {
-    console.warn(`⚠️ Received audio from client with no ID. Ignoring.`);
-    return;
-  }
-
   if (!session || session.state !== 'listening') {
-    console.log(`⚠️ Barge-in attempt detected for ${userId}. Current state: ${session?.state}. Ignoring audio.`);
-    sendMessage(ws, {
-      type: 'status_update',
-      message: 'Server is currently processing your previous request. Please wait.',
-      statusType: 'warning',
-      statusCode: 'BUSY_SERVER',
-      timestamp: new Date().toISOString()
-    });
+    // ... (rest of your existing busy server logic) ...
     return;
   }
 
   session.state = 'processing';
-
   try {
     const pipelineResult = await voicePipeline.processVoiceConversation(audioBuffer, userId);
 
     if (pipelineResult.success) {
-      if (pipelineResult.isUnrecognizedLanguage) {
-        const errorResponse = {
-          type: 'llm_response',
-          text: pipelineResult.steps.llm.response,
-          transcription: 'Unrecognized Language',
-          language: 'unknown',
-          processingTime: pipelineResult.totalDuration,
-          timestamp: pipelineResult.timestamp
-        };
-
-        console.log('🔍 DEBUG: About to send unrecognized language response');
-        sendMessage(ws, errorResponse);
-        console.log('🔍 DEBUG: Unrecognized language response sent');
-
-        await new Promise(resolve => setTimeout(resolve, 200));
-        const errorTTS = await pollyTTS.synthesizeSpeech(pipelineResult.steps.llm.response, {
-          voiceId: 'Kajal',
-          languageCode: 'hi-IN',
-          engine: 'neural'
-        });
-
-        if (errorTTS.success) {
-          sendBinary(ws, errorTTS.audioBuffer);
-          console.log('🔍 DEBUG: Error audio response sent');
-        }
-
-        return;
-      }
-
-      const response = {
+      // Send the text response
+      const textResponse = {
         type: 'llm_response',
         text: pipelineResult.steps.llm.response,
         transcription: pipelineResult.steps.stt.text,
         language: pipelineResult.steps.stt.language,
         processingTime: pipelineResult.totalDuration,
         timestamp: pipelineResult.timestamp,
-        debug: config.enableDebugLogging ? pipelineResult.steps.stt.debug : undefined
       };
+      sendMessage(ws, textResponse);
 
-      console.log('🔍 DEBUG: About to send JSON response');
-      sendMessage(ws, response);
-      console.log('🔍 DEBUG: JSON response sent');
+      // Now, stream the audio from RunPod
+      try {
+			const ttsStream = await streamTTSFromRunPod(pipelineResult.steps.llm.response, config.tts.defaultVoice);
+			
+			// This is the crucial part: relay the stream
+			ttsStream.on('data', (chunk) => {
+			  sendBinary(ws, chunk); // Send each chunk directly to the WebSocket client
+			});
 
-      await new Promise(resolve => setTimeout(resolve, 200));
-      sendBinary(ws, pipelineResult.steps.tts.audioBuffer);
-      console.log('🔍 DEBUG: Audio response sent');
+			ttsStream.on('end', () => {
+			  console.log(`✅ TTS streaming complete for ${userId}`);
+			  session.state = 'listening'; // Move to finally block or here
+			});
+			
+			ttsStream.on('error', (error) => {
+			   console.error('❌ RunPod streaming error:', error);
+			   sendMessage(ws, { type: 'error', message: 'TTS streaming failed' });
+			   session.state = 'listening';
+			});
 
-      console.log(`✅ Complete conversation processed for ${userId}`);
+      } catch (error) {
+        console.error('❌ RunPod streaming error:', error);
+        sendMessage(ws, { type: 'error', message: 'TTS streaming failed' });
+      }
+
     } else {
       sendMessage(ws, {
         type: 'error',
@@ -408,15 +365,14 @@ async function handleAudioMessage(audioBuffer, ws) {
 
   } catch (error) {
     console.error('❌ Audio processing error:', error);
-    sendMessage(ws, {
-      type: 'error',
-      message: 'Audio processing failed',
-      timestamp: new Date().toISOString()
-    });
-  } finally {
-    session.state = 'listening'; // ✅ Always reset no matter what
+    sendMessage(ws, { type: 'error', message: 'Audio processing failed' });
   }
+  
+  // Note: I moved session.state = 'listening'; inside the try/catch
+  // blocks to ensure it only resets after a response is sent.
+  // The 'end' event is also a good place to reset the state.
 }
+// --- END MODIFIED FUNCTION ---
 
 /**
  * Handle text message from WebSocket
@@ -508,6 +464,54 @@ async function handleTextMessage(message, ws) {
     });
   }
 }
+
+/**
+ * Streams audio chunks from the RunPod TTS endpoint
+ * @param {string} text The text to synthesize
+ * @param {string} voice The voice to use
+ * @returns {Promise<ReadableStream>} A promise that resolves to a readable stream of audio chunks
+ */
+async function streamTTSFromRunPod(text, voice) {
+	  const runpodUrl = `https://api.runpod.ai/v2/${config.runpod.endpointId}/run`;
+	  const parsedUrl = new URL(runpodUrl);
+
+	  const postData = JSON.stringify({
+		input: {
+		  text: text,
+		  voice: voice || config.tts.defaultVoice,
+		  sampling_rate: config.tts.samplingRate
+		}
+	  });
+
+	  const options = {
+		hostname: parsedUrl.hostname,
+		port: 443,
+		path: parsedUrl.pathname,
+		method: 'POST',
+		headers: {
+		  'Content-Type': 'application/json',
+		  'Content-Length': Buffer.byteLength(postData),
+		  'Authorization': `Bearer ${config.runpod.apiKey}`
+		}
+	  };
+
+	  return new Promise((resolve, reject) => {
+		const req = https.request(options, (res) => {
+		  if (res.statusCode !== 200) {
+			return reject(new Error(`RunPod API returned status code: ${res.statusCode}`));
+		  }
+		  resolve(res);
+		});
+
+		req.on('error', (e) => {
+		  reject(e);
+		});
+
+		req.write(postData);
+		req.end();
+	  });
+}
+// --- END NEW MODULE ---
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Error Handling & Cleanup

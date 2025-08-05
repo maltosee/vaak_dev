@@ -61,27 +61,8 @@ module.exports = {
   // UPDATED TTS CONFIGURATION FOR RUNPOD:
   tts: {
     provider: process.env.TTS_PROVIDER || 'runpod', // 'runpod' or 'polly'
-    
-    // RunPod TTS configuration
-    runpod: {
-      websocketUrl: process.env.RUNPOD_TTS_WEBSOCKET_URL,
-      apiKey: process.env.RUNPOD_API_KEY,
-      endpoint: process.env.RUNPOD_ENDPOINT_ID,
-      
-      // Streaming configuration
-      streamingThreshold: parseFloat(process.env.TTS_STREAMING_THRESHOLD) || 6.0, // seconds
-      bufferPercentage: parseFloat(process.env.TTS_BUFFER_PERCENTAGE) || 0.3, // 30%
-      chunkDuration: parseFloat(process.env.TTS_CHUNK_DURATION) || 0.5, // seconds
-      
-      // Voice settings
-      defaultVoice: process.env.RUNPOD_DEFAULT_VOICE || 'aryan_default',
-      playStepsInS: parseFloat(process.env.RUNPOD_PLAY_STEPS) || 0.5,
-      
-      // Connection settings
-      connectionTimeout: parseInt(process.env.RUNPOD_CONNECTION_TIMEOUT) || 10000, // ms
-      maxReconnectAttempts: parseInt(process.env.RUNPOD_MAX_RECONNECT_ATTEMPTS) || 3,
-      reconnectDelay: parseInt(process.env.RUNPOD_RECONNECT_DELAY) || 1000 // ms
-    }
+    defaultVoice: 'aryan_default',
+    samplingRate: 44100
   },
 
   aws: {
@@ -125,5 +106,10 @@ module.exports = {
     windowMs: getEnvNumber('RATE_LIMIT_WINDOW_MS', 15 * 60 * 1000),
     maxRequests: getEnvNumber('RATE_LIMIT_MAX_REQUESTS', 100),
     skipSuccessfulRequests: process.env.RATE_LIMIT_SKIP_SUCCESS === 'true'
+  },
+  runpod: {
+    endpointId: process.env.RUNPOD_ENDPOINT_ID,
+    apiKey: process.env.RUNPOD_API_KEY
   }
+  
 };

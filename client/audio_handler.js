@@ -14,6 +14,7 @@ class AudioHandler {
     this.delayTimeoutId = null;
     this.onAudioData = null; // Callback for audio data
 	this.audioMinDurationMs = 0; // Initialize, will be set from server config
+	this.sampleRate=null;
 
     
     console.log('🎵 AudioHandler initialized');
@@ -54,6 +55,7 @@ class AudioHandler {
 
 	  this.vadEndDelayMs = serverConfig.vadEndDelayMs;
 	  this.audioMinDurationMs = parseInt(serverConfig.audioConfig?.minDuration) || 1500;
+	  this.sampleRate = parseInt(serverConfig.audioConfig?.sampleRate);
 
 	  this.vadConfig = {
 		positiveSpeechThreshold: serverConfig.vadConfig.positiveSpeechThreshold,
@@ -187,8 +189,10 @@ onSpeechStart() {
       }
       
       // Create WAV header
-      const wavHeader = this.createWavHeader(int16Array.length * 2, 16000, 1);
+      //const wavHeader = this.createWavHeader(int16Array.length * 2, 16000, 1);
       
+	  const wavHeader = this.createWavHeader(int16Array.length * 2, this.sampleRate, 1);
+	  
       // Combine header and data
       const wavData = new Uint8Array(wavHeader.length + int16Array.byteLength);
       wavData.set(wavHeader, 0);

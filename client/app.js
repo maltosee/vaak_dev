@@ -39,18 +39,23 @@ class SanskritTutorApp {
     
     // Step 2: Initialize audio handler
     this.audioHandler = new AudioHandler();
-    this.audioHandler.setConfig(config);
-    this.audioHandler.onAudioData = (audioBlob) => {
-      this.sendAudioToServer(audioBlob);
-    };
+	this.audioHandler.setConfig(config);
+	this.audioHandler.onAudioData = (audioBlob) => this.sendAudioToServer(audioBlob);
     
     this.audioHandler.setOnSpeechValidatedCallback(() => {
-      console.log('🎯 Valid speech detected - checking for TTS interruption');
-      if (this.ttsPlaybackActive && this.allowBargeInImmediate) {
-        console.log("🛑 Speech validated — interrupting TTS");
-        this.stopTTSPlayback();
-      }
-    });
+		if (this.audioPlayer) {
+			this.audioPlayer.stopPlayback();
+		}
+	});
+	
+	this.audioPlayer = new StreamingAudioPlayer();
+	this.audioPlayer.onPlaybackComplete = () => {
+		// Re-enable listening after playback
+		if (this.isListening && this.audioHandler) {
+			this.audioHandler.startListening();
+		}
+	};
+	
     
     // Step 3: Initialize RunPod TTS Manager
     this.runpodTTS = new RunPodTTSManager(this.clientId);
@@ -154,6 +159,66 @@ class SanskritTutorApp {
     this.showStatus('Barge-in not allowed during TTS playback. Contact your admin if you want to interrupt responses.', 'warning');
     return true;
   }
+  
+  
+  
+  // Add this new class inside SanskritTutorApp
+class StreamingAudioPlayer {
+		constructor() {
+			this.audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 44100 });
+			this.audioQueue = [];
+			this.isPlaying = false;
+			this.onPlaybackComplete = () => {};
+			this.nextChunkTimestamp = 0;
+			this.currentSource = null;
+		}
+
+		async addAudioChunk(chunkBlob) {
+			const arrayBuffer = await chunkBlob.arrayBuffer();
+			const audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
+			this.audioQueue.push(audioBuffer);
+			if (!this.isPlaying) {
+				this.playNextChunk();
+			}
+		}
+
+		playNextChunk() {
+			if (this.audioQueue.length > 0 && !this.isPlaying) {
+				this.isPlaying = true;
+				const audioBuffer = this.audioQueue.shift();
+				const source = this.audioContext.createBufferSource();
+				source.buffer = audioBuffer;
+				source.connect(this.audioContext.destination);
+
+				const now = this.audioContext.currentTime;
+				const startTime = Math.max(now, this.nextChunkTimestamp);
+				this.currentSource = source;
+				source.start(startTime);
+				this.nextChunkTimestamp = startTime + audioBuffer.duration;
+
+				source.onended = () => {
+					this.isPlaying = false;
+					this.currentSource = null;
+					this.playNextChunk();
+					if (this.audioQueue.length === 0) {
+						this.onPlaybackComplete();
+					}
+				};
+			}
+		}
+
+		stopPlayback() {
+			this.audioQueue = [];
+			this.isPlaying = false;
+			this.nextChunkTimestamp = 0;
+			if (this.currentSource) {
+				this.currentSource.stop();
+				this.currentSource = null;
+			}
+		}
+}
+  
+  
 
   /**
    * Setup WebSocket event handlers
@@ -285,9 +350,9 @@ class SanskritTutorApp {
         }
         
       } else if (event.data instanceof Blob) {
-        this.handleAudioResponse(event.data);
+        this.audioPlayer.addAudioChunk(event.data);
       } else if (event.data instanceof ArrayBuffer) {
-        this.handleAudioResponse(new Blob([event.data]));
+			this.audioPlayer.addAudioChunk(new Blob([event.data]));
       }
       
     } catch (error) {

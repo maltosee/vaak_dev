@@ -1,0 +1,39 @@
+# The name of your model deployment
+name: indic-parler-tts
+
+# A short description of what your model does
+description: "Sanskrit Parler TTS model for conversational AI"
+
+# The hardware to use. A GPU is required for this model.
+# Replicate recommends an Nvidia A100 for fast inference.
+hardware: "nvidia-a100"
+
+# The model's inputs. These should match the parameters of your predict() method.
+inputs:
+  text:
+    type: str
+    default: "नमः"
+    description: "The Sanskrit text to be synthesized."
+  voice:
+    type: str
+    default: "aryan_default"
+    description: "The voice style to use for synthesis."
+
+# The output of your model. A streamed audio file.
+output:
+  type: file
+  description: "A streaming WAV audio file."
+
+# Build information
+build:
+  # Use a suitable Python and GPU-enabled base image
+  python_version: "3.10"
+  cuda_version: "11.8"
+  system_packages:
+    - "libsndfile1"
+    - "ffmpeg"
+    - "git"
+  pip_packages: requirements.txt
+
+# The command to run when the model is started
+command: "python -m predict"
