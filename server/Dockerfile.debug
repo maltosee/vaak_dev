@@ -1,0 +1,10 @@
+﻿FROM node:18-alpine
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci --only=production
+COPY . .
+RUN echo "=== Listing all files ===" && find . -name "*.js" | head -20
+RUN echo "=== Modules directory ===" && ls -la modules/
+RUN echo "=== Checking dualSTT ===" && ls -la modules/dualSTT.js || echo "dualSTT.js NOT FOUND"
+RUN echo "=== Working directory contents ===" && ls -la
+CMD ["node", "index.js"]

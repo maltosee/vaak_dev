@@ -1,0 +1,76 @@
+# runpod_tts/runpod.yaml
+# RunPod deployment configuration for Sanskrit Vaak TTS WebSocket Service
+
+apiVersion: runpod.io/v1
+kind: Pod
+metadata:
+  name: sanskrit-vaak-tts-ws
+  generateName: vaak-tts-
+
+spec:
+  # GPU Configuration
+  gpu:
+    type: "RTX L4"
+    memory: "8Gi"
+    count: 1
+
+  # Container Configuration  
+  container:
+    image: "vaak-tts-websocket:latest"
+    ports:
+      - containerPort: 8000
+        protocol: "TCP"
+        name: "websocket"
+    
+    # Environment Variables
+    env:
+      - name: "RUNPOD_POD_ID"
+        valueFrom:
+          fieldRef:
+            fieldPath: "metadata.name"
+      - name: "GPU_MEMORY"
+        value: "8192"
+      - name: "TORCH_DEVICE"
+        value: "cuda"
+      - name: "LOG_LEVEL" 
+        value: "INFO"
+      - name: "MAX_CLIENTS"
+        value: "10"
+
+  # Resource Limits
+  resources:
+    requests:
+      memory: "4Gi"
+      cpu: "2"
+    limits:
+      memory: "12Gi" 
+      cpu: "4"
+
+  # WebSocket Configuration
+  networking:
+    websocket:
+      enabled: true
+      timeout: 300 # 5 minutes max connection
+    ports:
+      - 8000
+
+  # Health Check
+  healthCheck:
+    httpGet:
+      path: "/health"
+      port: 8000
+    initialDelaySeconds: 30
+    periodSeconds: 10
+
+  # Auto-scaling
+  scaling:
+    minReplicas: 0  # Serverless - scale to zero
+    maxReplicas: 3
+    idleTimeout: 30 # Scale down after 30s idle
+    
+  # Volume mounts for model cache
+  volumes:
+    - name: model-cache
+      hostPath:
+        path: "/tmp/vaak-models"
+      mountPath: "/app/models"

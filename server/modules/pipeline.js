@@ -1,14 +1,18 @@
 // Voice conversation pipeline: STT → LLM → TTS
 const dualSTT = require('./dualSTT');
 const sanskritGPT = require('./gpt');
-const pollyTTS = require('./tts');
+// REPLACE THIS LINE:
+// const pollyTTS = require('./tts');
+// WITH THIS LINE:
+const runpodTTS = require('./runpod_tts');
+
 const sessionManager = require('./session');
 const config = require('../utils/config');
 
 class VoicePipeline {
   constructor() {
     this.isInitialized = false;
-	this.lastHealthLogTime = 0; // ✅ ADD THIS LINE
+    this.lastHealthLogTime = 0;
     this.stats = {
       totalProcessed: 0,
       successfulConversations: 0,
@@ -29,7 +33,12 @@ class VoicePipeline {
       // Test each module
       console.log('  ✅ Dual STT module loaded');
       console.log('  ✅ Sanskrit GPT module loaded');  
-      console.log('  ✅ Polly TTS module loaded');
+      
+      // ADD RUNPOD TTS INITIALIZATION:
+      console.log('  🔧 Initializing RunPod TTS...');
+      await runpodTTS.initialize();
+      console.log('  ✅ RunPod TTS module loaded');
+      
       console.log('  ✅ Session Manager loaded');
       
       this.isInitialized = true;
@@ -59,22 +68,17 @@ class VoicePipeline {
         throw new Error('Pipeline not initialized');
       }
 
-      // Update session state
-      //sessionManager.updateState(userId, 'processing');
-
       // Step 1: Speech to Text (STT) with Dual STT
       const sttStart = Date.now();
-	  console.log(`Phase (STT) Starting transcription...`);
+      console.log(`Phase (STT) Starting transcription...`);
       
       let sttResult;
       if (config.stt.enableDualSTT) {
-        // Use dual STT (Custom + Whisper with language detection)
         sttResult = await dualSTT.transcribe(audioBuffer, {
           format: options.audioFormat || 'webm',
           language: options.language || 'auto'
         });
       } else {
-        // Fallback to original Whisper only
         const whisperSTT = require('./whisper');
         sttResult = await whisperSTT.transcribe(audioBuffer, {
           format: options.audioFormat || 'webm',
@@ -87,13 +91,10 @@ class VoicePipeline {
       }
 
       const sttDuration = Date.now() - sttStart;
-	  console.log(`Phase (STT) {${sttDuration}ms} Transcription: "${sttResult.text}" (${sttResult.language})`);
+      console.log(`Phase (STT) {${sttDuration}ms} Transcription: "${sttResult.text}" (${sttResult.language})`);
 
       // Handle unrecognized language
       if (sttResult.text === 'Unrecognized Language' || sttResult.text === '') {
-        // Update session state back to listening
-        //sessionManager.updateState(userId, 'listening');
-        
         return {
           success: true,
           pipelineId,
@@ -119,49 +120,47 @@ class VoicePipeline {
       }
 
       // Step 2: Language Model (LLM) 
-         const llmStart = Date.now();
-	     console.log(`Phase (LLM) Starting response generation...`);
-		 const llmResult = await sanskritGPT.generateSanskritResponse(
-				sttResult.text, 
-				userId, 
-				{
-				  detectedLanguage: sttResult.language,
-				  audioQuality: this.assessAudioQuality(audioBuffer)
-				}
-		);
+      const llmStart = Date.now();
+      console.log(`Phase (LLM) Starting response generation...`);
+      const llmResult = await sanskritGPT.generateSanskritResponse(
+        sttResult.text, 
+        userId, 
+        {
+          detectedLanguage: sttResult.language,
+          audioQuality: this.assessAudioQuality(audioBuffer)
+        }
+      );
 
       if (!llmResult.success) {
         throw new Error(`LLM failed: ${llmResult.error}`);
       }
 
       const llmDuration = Date.now() - llmStart;
-	  console.log(`Phase (LLM) {${llmDuration}ms} Response generated: "${llmResult.response.substring(0, 50)}..."`);
+      console.log(`Phase (LLM) {${llmDuration}ms} Response generated: "${llmResult.response.substring(0, 50)}..."`);
 
-      // Step 3: Text to Speech (TTS)
+      // Step 3: Text to Speech (TTS) - UPDATED FOR RUNPOD
       const ttsStart = Date.now();
-	  console.log(`Phase (TTS) Starting speech synthesis...`);
-      const ttsResult = await pollyTTS.synthesizeSpeech(
-			llmResult.response,
-			{
-			  voiceId: 'Kajal', // Use bilingual voice
-			  languageCode: 'hi-IN', // Hindi base for bilingual
-			  engine: 'neural' // Better quality
-			}
+      console.log(`Phase (TTS) Starting speech synthesis via RunPod...`);
+      
+      // REPLACE POLLY TTS CALL WITH RUNPOD TTS:
+      const ttsResult = await runpodTTS.synthesizeSpeech(
+        llmResult.response,
+        userId, // Pass client ID
+        {
+          voice: 'aryan_default',
+          playStepsInS: 0.5
+        }
       );
 
       if (!ttsResult.success) {
         throw new Error(`TTS failed: ${ttsResult.error}`);
       }
 
-      // Calculate total processing time
       const ttsDuration = Date.now() - ttsStart;
-	  const totalDuration = Date.now() - pipelineStart;
+      const totalDuration = Date.now() - pipelineStart;
 
       // Update statistics
       this.updateStats(true, totalDuration);
-
-      // Update session state
-      //sessionManager.updateState(userId, 'speaking');
 
       const result = {
         success: true,
@@ -172,7 +171,7 @@ class VoicePipeline {
             language: sttResult.language,
             duration: sttResult.duration,
             audioSize: sttResult.audioSize,
-            debug: sttResult.debug // Include dual STT debug info
+            debug: sttResult.debug
           },
           llm: {
             response: llmResult.response,
@@ -180,20 +179,23 @@ class VoicePipeline {
             duration: llmResult.duration,
             conversationLength: llmResult.conversationLength
           },
+          // UPDATED TTS RESULT FOR RUNPOD:
           tts: {
-            audioBuffer: ttsResult.audioBuffer,
-            audioSize: ttsResult.audioSize,
-            voice: ttsResult.voice,
-            format: ttsResult.format,
-            duration: ttsResult.duration
+            requestId: ttsResult.requestId,
+            clientId: ttsResult.clientId,
+            estimatedDuration: ttsResult.estimatedDuration,
+            textLength: ttsResult.textLength,
+            streaming: true, // Indicate this is streamed via RunPod
+            message: ttsResult.message,
+            duration: ttsDuration
           }
         },
         totalDuration,
         timestamp: new Date().toISOString()
       };
 
-      console.log(`Phase (TTS) {${ttsDuration}ms} Speech synthesis completed`);
-	  console.log(`✅ Pipeline ${pipelineId} completed in ${totalDuration}ms (STT: ${sttDuration}ms, LLM: ${llmDuration}ms, TTS: ${ttsDuration}ms)`);
+      console.log(`Phase (TTS) {${ttsDuration}ms} TTS request sent to RunPod`);
+      console.log(`✅ Pipeline ${pipelineId} completed in ${totalDuration}ms (STT: ${sttDuration}ms, LLM: ${llmDuration}ms, TTS: ${ttsDuration}ms)`);
       return result;
 
     } catch (error) {
@@ -202,11 +204,7 @@ class VoicePipeline {
       
       console.error(`❌ Pipeline ${pipelineId} failed: ${error.message}`);
       
-      // Update statistics
       this.updateStats(false, totalDuration);
-      
-      // Update session state back to listening
-      //sessionManager.updateState(userId, 'listening');
 
       return {
         success: false,
@@ -231,9 +229,6 @@ class VoicePipeline {
     
     try {
       console.log(`📝 Text Pipeline ${pipelineId} started`);
-      
-      // Update session state
-      //sessionManager.updateState(userId, 'processing');
 
       // Step 1: LLM Processing
       const llmResult = await sanskritGPT.generateSanskritResponse(text, userId);
@@ -242,12 +237,15 @@ class VoicePipeline {
         throw new Error(`LLM failed: ${llmResult.error}`);
       }
 
-      // Step 2: TTS Processing
-      const ttsResult = await pollyTTS.synthesizeSpeech(llmResult.response, {
-        voiceId: 'Kajal',
-        languageCode: 'hi-IN',
-        engine: 'neural'
-      });
+      // Step 2: TTS Processing via RunPod
+      const ttsResult = await runpodTTS.synthesizeSpeech(
+        llmResult.response,
+        userId,
+        {
+          voice: 'aryan_default',
+          playStepsInS: 0.5
+        }
+      );
       
       if (!ttsResult.success) {
         throw new Error(`TTS failed: ${ttsResult.error}`);
@@ -255,9 +253,6 @@ class VoicePipeline {
 
       const endTime = Date.now();
       const totalDuration = endTime - startTime;
-      
-      // Update session state
-      //sessionManager.updateState(userId, 'speaking');
 
       console.log(`✅ Text Pipeline ${pipelineId} completed in ${totalDuration}ms`);
       
@@ -266,14 +261,13 @@ class VoicePipeline {
         pipelineId,
         inputText: text,
         response: llmResult.response,
-        audioBuffer: ttsResult.audioBuffer,
+        ttsRequestId: ttsResult.requestId, // RunPod streaming reference
         totalDuration,
         timestamp: new Date().toISOString()
       };
 
     } catch (error) {
       console.error(`❌ Text Pipeline ${pipelineId} failed: ${error.message}`);
-      //sessionManager.updateState(userId, 'listening');
       
       return {
         success: false,
@@ -286,8 +280,6 @@ class VoicePipeline {
 
   /**
    * Assess audio quality for processing optimization
-   * @param {Buffer} audioBuffer - Audio data
-   * @returns {string} Quality assessment
    */
   assessAudioQuality(audioBuffer) {
     const size = audioBuffer.length;
@@ -301,8 +293,6 @@ class VoicePipeline {
 
   /**
    * Update pipeline statistics
-   * @param {boolean} success - Whether pipeline succeeded
-   * @param {number} duration - Processing duration in ms
    */
   updateStats(success, duration) {
     this.stats.totalProcessed++;
@@ -313,14 +303,12 @@ class VoicePipeline {
       this.stats.errors++;
     }
     
-    // Update average processing time
     const total = this.stats.averageProcessingTime * (this.stats.totalProcessed - 1) + duration;
     this.stats.averageProcessingTime = Math.round(total / this.stats.totalProcessed);
   }
 
   /**
    * Get pipeline statistics
-   * @returns {Object} Pipeline stats
    */
   getStats() {
     const successRate = this.stats.totalProcessed > 0 
@@ -336,61 +324,32 @@ class VoicePipeline {
 
   /**
    * Health check for all pipeline components
-   * @returns {Object} Health status
    */
-   
-  
-// BEFORE:
-async healthCheck() {
-  console.log('🔍 getAllSessions().length =', sessionManager.getAllSessions().length);
-  console.log('🔍 maxSessions =', sessionManager.maxSessions);
-  
-  const health = {
-    pipeline: this.isInitialized,
-    components: {
-      dualSTT: config.stt.enableDualSTT,
-      whisper: true,
-      gpt: true,
-      tts: true,
-      sessions: sessionManager.getAllSessions().length < sessionManager.maxSessions
-    },
-    stats: this.getStats(),
-    timestamp: new Date().toISOString()
-  };
+  async healthCheck() {
+    const now = Date.now();
+    if (!this.lastHealthLogTime || (now - this.lastHealthLogTime) >= 15 * 60 * 1000) {
+      console.log('🩺 Health Check (15min): Sessions:', sessionManager.getAllSessions().length, '/', sessionManager.maxSessions);
+      this.lastHealthLogTime = now;
+    }
+    
+    const health = {
+      pipeline: this.isInitialized,
+      components: {
+        dualSTT: config.stt.enableDualSTT,
+        whisper: true,
+        gpt: true,
+        runpodTTS: runpodTTS.getStatus().isConnected, // Check RunPod connection
+        sessions: sessionManager.getAllSessions().length < sessionManager.maxSessions
+      },
+      stats: this.getStats(),
+      timestamp: new Date().toISOString()
+    };
 
-  const allHealthy = Object.values(health.components).every(status => status === true);
-  health.overall = allHealthy && health.pipeline;
+    const allHealthy = Object.values(health.components).every(status => status === true);
+    health.overall = allHealthy && health.pipeline;
 
-  return health;
-}
-
-// AFTER:
-	async healthCheck() {
-	  // Only log health checks every 15 minutes
-	  const now = Date.now();
-	  if (!this.lastHealthLogTime || (now - this.lastHealthLogTime) >= 15 * 60 * 1000) {
-		console.log('🩺 Health Check (15min): Sessions:', sessionManager.getAllSessions().length, '/', sessionManager.maxSessions);
-		this.lastHealthLogTime = now;
-	  }
-	  
-	  const health = {
-		pipeline: this.isInitialized,
-		components: {
-		  dualSTT: config.stt.enableDualSTT,
-		  whisper: true,
-		  gpt: true,
-		  tts: true,
-		  sessions: sessionManager.getAllSessions().length < sessionManager.maxSessions
-		},
-		stats: this.getStats(),
-		timestamp: new Date().toISOString()
-	  };
-
-	  const allHealthy = Object.values(health.components).every(status => status === true);
-	  health.overall = allHealthy && health.pipeline;
-
-	  return health;
-	}
+    return health;
+  }
 
   /**
    * Reset pipeline statistics
@@ -403,6 +362,16 @@ async healthCheck() {
       averageProcessingTime: 0
     };
     console.log('📊 Pipeline statistics reset');
+  }
+
+  /**
+   * Cleanup pipeline resources
+   */
+  async cleanup() {
+    if (runpodTTS) {
+      await runpodTTS.cleanup();
+    }
+    console.log('🧹 Pipeline cleanup completed');
   }
 }
 
