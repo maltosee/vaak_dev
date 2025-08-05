@@ -4,9 +4,10 @@ FROM python:3.10-slim-bookworm
 # Set the working directory
 WORKDIR /app
 
+# Install git so you can clone your repository
+RUN apt-get update && apt-get install -y git
+
 # Clone your repository and install dependencies
-# This command clones the repo and installs packages from the requirements.txt file
-# inside the runpod_tts subdirectory.
 RUN git clone https://github.com/maltosee/vaak_dev.git . && \
     pip install --no-cache-dir -r runpod_tts/requirements.txt
 
