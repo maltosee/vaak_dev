@@ -16,6 +16,9 @@ def handler(job):
         voice = job_input.get('voice', 'aryan_default')
         play_steps_in_s = job_input.get('play_steps_in_s', 0.5)
         
+        # FIX: Add debug log for incoming job inputs
+        logging.info(f"🔍 Handler received job: text='{text[:50]}...', voice='{voice}'")
+        
         if not text:
             return {"error": "Text required"}
         
@@ -33,6 +36,8 @@ def handler(job):
             }
             
             chunk_count = 0
+            # FIX: Add a log before starting the synthesis loop
+            logging.info(f"🔍 [{request_id}] Starting synthesis loop...")
             for wav_chunk in tts_service.stream_synthesis(text, voice, play_steps_in_s, request_id):
                 chunk_count += 1
                 yield {

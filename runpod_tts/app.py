@@ -75,6 +75,8 @@ class StreamingTTSService:
     def stream_synthesis(self, text: str, voice_key: str, play_steps_in_s: float, request_id: str):
         logger = logging.getLogger(__name__)
         logger.info(f"🎵 [{request_id}] Starting synthesis: '{text[:50]}...'")
+        logger.info(f"🔍 [{request_id}] stream_synthesis received: text='{text[:50]}...', voice='{voice_key}'")
+
 
         voice_description = VOICE_CONFIGS.get(voice_key, VOICE_CONFIGS["aryan_default"])
 
@@ -108,6 +110,9 @@ class StreamingTTSService:
             try:
                 
                 chunk_send_times = []  # Track exact send times
+                # FIX: Add a log to confirm we are entering the stream loop
+                logger.info(f"🔍 [{request_id}] Entering streamer loop...")
+                for audio_chunk in streamer:
                 for audio_chunk in streamer:
                     if audio_chunk.shape[0] == 0:
                         break
