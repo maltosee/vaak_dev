@@ -175,7 +175,6 @@ class SanskritTutorApp {
         if (typeof event.data === 'string') {
             const data = JSON.parse(event.data);
             switch (data.type) {
-                // FIX: Add a new case to handle audio chunks
                 case 'stream_start':
                     console.log(`🔊 Received stream start: ${data.text}`);
                     this.ttsPlaybackActive = true;
@@ -542,6 +541,7 @@ let app;
 // Initialize app when DOM is loaded
 document.addEventListener('DOMContentLoaded', async () => {
   try {
+    // FIX: Change the URL to remove the incorrect '/api' prefix
     app = new SanskritTutorApp();
     await app.initialize();
     

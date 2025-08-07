@@ -3,8 +3,6 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-	<!-- Load configuration first -->
-	<script src="https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.7/dist/bundle.min.js"></script>
     <title>Sanskrit Tutor - Voice Conversation</title>
     <link rel="stylesheet" href="style.css">
 </head>
@@ -16,7 +14,6 @@
         </header>
 
         <main>
-            <!-- Authentication Section -->
             <section id="auth-section" class="card">
                 <h2>🔐 Connect to Tutor</h2>
                 <div class="form-group">
@@ -31,58 +28,48 @@
                 <div id="auth-status" class="status"></div>
             </section>
 
-            <!-- Voice Conversation Section -->
             <section id="conversation-section" class="card hidden">
                 <h2>🎙️ Voice Conversation</h2>
                 
-                <!-- Connection Status -->
                 <div id="connection-status" class="status-bar">
                     <span id="status-text">Disconnected</span>
                     <span id="user-name"></span>
                 </div>
 
-                <!-- Voice Activity Indicator -->
                 <div id="voice-activity" class="voice-indicator">
                     <div id="voice-circle" class="voice-circle"></div>
                     <div id="voice-status">Click "Start Listening" to begin</div>
                 </div>
 
-                <!-- Controls -->
                 <div class="controls">
                     <button id="start-listening-btn" class="btn btn-success">🎤 Start Listening</button>
                     <button id="stop-listening-btn" class="btn btn-danger hidden">🛑 Stop Listening</button>
                     <button id="disconnect-btn" class="btn btn-secondary">Disconnect</button>
                 </div>
 
-                <!-- Conversation Display -->
                 <div id="conversation-display" class="conversation">
                     <div class="conversation-header">Conversation History</div>
                     <div id="messages" class="messages"></div>
                 </div>
 
-                <!-- Debug Info -->
                 <details class="debug-info">
                     <summary>🔧 Debug Information</summary>
                     <div id="debug-info" class="debug-content"></div>
                 </details>
             </section>
 
-            <!-- Audio Playback (hidden) -->
             <audio id="audio-player" preload="auto"></audio>
         </main>
 
         <footer>
-            <p>Powered by OpenAI Whisper, GPT, RunPod TTS, and Silero VAD</p>
+            <p>Powered by OpenAI Whisper, GPT, AWS Polly, and Silero VAD</p>
         </footer>
     </div>
 
-    <!-- Load VAD and App Scripts -->
-	<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.14.0/dist/ort.js"></script>
-	<script src="https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.22/dist/bundle.min.js"></script>
-	
-	<!-- ADD RUNPOD TTS MANAGER BEFORE APP.JS -->
-	<script src="runpod_tts_manager.js"></script>
-	<script src="audio_handler.js?v=3"></script>
-	<script src="app.js?v=3"></script>
+	<script src="config.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.14.0/dist/ort.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.22/dist/bundle.min.js"></script>
+    <script src="audio_handler.js"></script>
+    <script src="app.js"></script>
 </body>
 </html>

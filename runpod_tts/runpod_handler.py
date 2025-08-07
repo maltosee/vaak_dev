@@ -58,6 +58,22 @@ def handler(job):
     except Exception as e:
         logging.error(f"Handler error: {e}")
         return {"error": str(e)}
+        
+# ADD THIS HEALTH CHECK FUNCTION
+def health_check():
+    """Simple health check for RunPod"""
+    try:
+        # Test if TTS service is loaded
+        if tts_service and hasattr(tts_service, 'model'):
+            return {"status": "healthy", "model_loaded": True}
+        else:
+            return {"status": "unhealthy", "model_loaded": False}
+    except Exception as e:
+        return {"status": "unhealthy", "error": str(e)}
 
 if __name__ == "__main__":
-    runpod.serverless.start({"handler": handler})
+    # ADD HEALTH CHECK TO SERVERLESS CONFIG
+    runpod.serverless.start({
+        "handler": handler,
+        "health_check": health_check  # Add this line
+    })

@@ -5,9 +5,9 @@ const CONFIG = {
   },
   
   BASE_URL: {
-    development: 'http://localhost:8080',
-    production: 'https://sanskrit-tutor-backend.fly.dev'
-  },
+	  development: 'https://sanskrit-tutor-backend.fly.dev',  // Point to Fly even in dev
+	  production: 'https://sanskrit-tutor-backend.fly.dev'
+ },
   
   getEnvironment() {
     return window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' 
