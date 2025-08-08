@@ -116,6 +116,8 @@ class StreamingTTSService:
 tts_service = StreamingTTSService()
 tts_service.load_model()
 
+# FIX: The handler function itself must become a generator.
+# The core change is replacing the 'return' statement with a 'for' loop that 'yields'.
 def handler(job):
     """RunPod serverless handler with generator for streaming"""
     try:
@@ -127,12 +129,14 @@ def handler(job):
         logging.info(f"🔍 Handler received job: text='{text[:50]}...', voice='{voice}'")
         
         if not text:
-            return {"error": "Text required"}
-        
+            # We must still return a JSON-serializable object for errors
+            yield {"error": "Text required"}
+            return # End the generator
+
         request_id = str(uuid.uuid4())[:8]
         logging.info(f"🎵 RunPod request [{request_id}]: '{text[:50]}...'")
         
-        # Generator for streaming chunks
+        # Generator for streaming chunks (no change needed here)
         def stream_generator():
             yield {
                 "type": "stream_start",
@@ -159,11 +163,14 @@ def handler(job):
                 "total_chunks": chunk_count
             }
         
-        return stream_generator()
+        # FIX: Iterate over the nested generator and yield each item from the handler
+        for item in stream_generator():
+            yield item
         
     except Exception as e:
         logging.error(f"Handler error: {e}")
-        return {"error": str(e)}
-
+        # On error, yield a JSON-serializable error message
+        yield {"error": str(e)}   
+        
 if __name__ == "__main__":
     runpod.serverless.start({"handler": handler})
