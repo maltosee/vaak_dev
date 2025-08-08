@@ -7,11 +7,15 @@ WORKDIR /app
 # Install git and other essentials
 RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
 
+
 # Clone your repository 
 RUN git clone https://github.com/maltosee/vaak_dev.git .
 
 # Upgrade PyTorch to 2.2+ for torch.uint64 support  
 RUN pip install --upgrade torch==2.2.0 torchvision==0.17.0 torchaudio==2.2.0 --index-url https://download.pytorch.org/whl/cu118
+
+# CRITICAL: Reinstall safetensors to relink with new PyTorch
+RUN pip install --force-reinstall safetensors
 
 # Install dependencies
 RUN pip install --no-cache-dir -r runpod_tts/requirements.txt
