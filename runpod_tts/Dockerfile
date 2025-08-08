@@ -1,5 +1,5 @@
-# Use a suitable PyTorch base image
-FROM runpod/pytorch:2.1.0-py3.10-cuda11.8.0-devel-ubuntu22.04
+# Use a suitable PyTorch base image with newer PyTorch version
+FROM runpod/pytorch:2.4.0-py3.10-cuda12.1.1-devel-ubuntu22.04
 
 # Set the working directory
 WORKDIR /app
