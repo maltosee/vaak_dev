@@ -1,14 +1,12 @@
 # Use a suitable PyTorch base image
 # FIX: Use a compatible PyTorch version (2.3.0 or newer)
-FROM runpod/pytorch:2.4.0-py3.11-cuda12.4.1-cudnn-devel-ubuntu22.04
+FROM runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04
 
 # Set the working directory
 WORKDIR /app
 
 # Install git and other essentials
-# FIX: Add 'git' to the PATH
-RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/* && \
-    ln -s /usr/bin/git /usr/local/bin/git
+RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
 
 # The previous PyTorch downgrade is no longer needed since we have a compatible base image.
 # We can remove these lines to simplify the build process.
