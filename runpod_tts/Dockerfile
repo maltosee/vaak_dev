@@ -1,5 +1,5 @@
-# Use a suitable PyTorch base image with newer PyTorch version
-FROM runpod/pytorch:2.4.0-py3.10-cuda12.1.1-devel-ubuntu22.04
+# Use existing RunPod PyTorch base image  
+FROM runpod/pytorch:2.1.0-py3.10-cuda11.8.0-devel-ubuntu22.04
 
 # Set the working directory
 WORKDIR /app
@@ -9,6 +9,9 @@ RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
 
 # Clone your repository 
 RUN git clone https://github.com/maltosee/vaak_dev.git .
+
+# Upgrade PyTorch to 2.2+ for torch.uint64 support  
+RUN pip install --upgrade torch==2.2.0 torchvision==0.17.0 torchaudio==2.2.0 --index-url https://download.pytorch.org/whl/cu118
 
 # Install dependencies
 RUN pip install --no-cache-dir -r runpod_tts/requirements.txt
