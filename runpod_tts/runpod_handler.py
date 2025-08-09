@@ -7,6 +7,12 @@ import soundfile as sf
 import io
 import time
 
+print("🚨 STATIC AUDIO HANDLER LOADED - NO TTS MODELS 🚨")
+print("🚨 THIS IS THE NEW VERSION 🚨")
+
+import runpod
+# ... rest of static audio code
+
 # NO TTS IMPORTS - NO MODEL LOADING
 
 def create_test_audio_chunks(duration_seconds=2, sample_rate=22050, chunk_size_seconds=0.5):
