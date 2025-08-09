@@ -116,10 +116,8 @@ class StreamingTTSService:
 tts_service = StreamingTTSService()
 tts_service.load_model()
 
-# FIX: The handler function itself must become a generator.
-# The core change is replacing the 'return' statement with a 'for' loop that 'yields'.
 def handler(job):
-    """RunPod serverless handler with generator for streaming"""
+    """RunPod serverless handler with generator for streaming - FLATTENED PATTERN"""
     try:
         job_input = job['input']
         text = job_input.get('text', '').strip()
@@ -129,51 +127,46 @@ def handler(job):
         logging.info(f"🔍 Handler received job: text='{text[:50]}...', voice='{voice}'")
         
         if not text:
-            # We must still return a JSON-serializable object for errors
             yield {"error": "Text required"}
-            return # End the generator
+            return
 
         request_id = str(uuid.uuid4())[:8]
         logging.info(f"🎵 RunPod request [{request_id}]: '{text[:50]}...'")
         
-        # Generator for streaming chunks (no change needed here)
-        def stream_generator():
+        # FIX: Yield stream_start directly from handler (no nested generator)
+        yield {
+            "type": "stream_start",
+            "request_id": request_id,
+            "text": text,
+            "voice": voice,
+            "sampling_rate": tts_service.sampling_rate  # Use actual sampling rate
+        }
+        
+        chunk_count = 0
+        logging.info(f"🔍 [{request_id}] Starting synthesis loop...")
+        
+        # FIX: Iterate directly and yield from handler (flattened pattern)
+        for wav_chunk in tts_service.stream_synthesis(text, voice, play_steps_in_s, request_id):
+            chunk_count += 1
             yield {
-                "type": "stream_start",
-                "request_id": request_id,
-                "text": text,
-                "voice": voice,
-                "sampling_rate": 44100
-            }
-            
-            chunk_count = 0
-            logging.info(f"🔍 [{request_id}] Starting synthesis loop...")
-            for wav_chunk in tts_service.stream_synthesis(text, voice, play_steps_in_s, request_id):
-                chunk_count += 1
-                yield {
-                    "type": "audio_chunk",
-                    "chunk_id": chunk_count,
-                    "audio_data": wav_chunk.hex(),  # Convert bytes to hex
-                    "request_id": request_id
-                }
-            
-            yield {
-                "type": "stream_complete", 
-                "request_id": request_id,
-                "total_chunks": chunk_count
+                "type": "audio_chunk",
+                "chunk_id": chunk_count,
+                "audio_data": wav_chunk.hex(),  # Convert bytes to hex
+                "request_id": request_id
             }
         
-        # FIX: Iterate over the nested generator and yield each item from the handler
-        for item in stream_generator():
-            yield item
+        yield {
+            "type": "stream_complete", 
+            "request_id": request_id,
+            "total_chunks": chunk_count
+        }
         
     except Exception as e:
         logging.error(f"Handler error: {e}")
-        # On error, yield a JSON-serializable error message
         yield {"error": str(e)}   
         
 if __name__ == "__main__":
     runpod.serverless.start({
-    "handler": handler,
-    "return_aggregate_stream": True  # Add this line
+        "handler": handler,
+        "return_aggregate_stream": True
     })
