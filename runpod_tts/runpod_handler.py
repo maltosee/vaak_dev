@@ -6,12 +6,12 @@ import torch
 import numpy as np
 import soundfile as sf
 import io
-import time
+import base64
 from threading import Thread
 from parler_tts import ParlerTTSForConditionalGeneration, ParlerTTSStreamer
 from transformers import AutoTokenizer
 
-# Voice configs (moved from app.py)
+# Voice configs
 VOICE_CONFIGS = {
     "aryan_default": "Aryan speaks in a warm, respectful tone suitable for Sanskrit conversation while ensuring proper halant pronunciations and clear consonant clusters",
     "aryan_scholarly": "Aryan recites Sanskrit with scholarly precision and poetic sensibility while ensuring proper halant pronunciations and clear consonant clusters.",
@@ -63,7 +63,8 @@ class StreamingTTSService:
 
         logger.info(f"✅ TTS model loaded and initialized on {self.device}")
 
-    def stream_synthesis(self, text: str, voice_key: str, play_steps_in_s: float, request_id: str):
+    def audio_chunks_generator(self, text: str, voice_key: str, play_steps_in_s: float, request_id: str):
+        """Generator that yields audio chunks - EXACTLY like text_to_speech_simulator"""
         logger = logging.getLogger(__name__)
         logger.info(f"🎵 [{request_id}] Starting synthesis: '{text[:50]}...'")
 
@@ -93,31 +94,33 @@ class StreamingTTSService:
             thread = Thread(target=self.model.generate, kwargs=generation_kwargs)
             thread.start()
 
-            chunk_count = 0
             try:
                 logger.info(f"🔍 [{request_id}] Entering streamer loop...")
                 for audio_chunk in streamer:
                     if audio_chunk.shape[0] == 0:
                         break
-                    chunk_count += 1
+                    
+                    # Convert to base64 string (like text chunks)
                     audio_float32 = audio_chunk.astype(np.float32)
                     buffer = io.BytesIO()
                     sf.write(buffer, audio_float32, self.sampling_rate, format='WAV')
                     buffer.seek(0)
                     wav_bytes = buffer.read()
                     
-                    logger.info(f"📤 [{request_id}] Chunk {chunk_count}: {len(wav_bytes)} bytes")
-                    yield wav_bytes
+                    # Yield base64 encoded audio as string (like text)
+                    audio_chunk_str = base64.b64encode(wav_bytes).decode('utf-8')
+                    yield audio_chunk_str
+                    
             finally:
                 thread.join()
-                logger.info(f"✅ [{request_id}] Complete: {chunk_count} chunks")
+                logger.info(f"✅ [{request_id}] Complete")
 
 # Initialize TTS service globally 
 tts_service = StreamingTTSService()
 tts_service.load_model()
 
 def handler(job):
-    """RunPod serverless handler with generator for streaming - FLATTENED PATTERN"""
+    """FAITHFUL REPLICATION of canonical text streaming pattern"""
     try:
         job_input = job['input']
         text = job_input.get('text', '').strip()
@@ -133,33 +136,11 @@ def handler(job):
         request_id = str(uuid.uuid4())[:8]
         logging.info(f"🎵 RunPod request [{request_id}]: '{text[:50]}...'")
         
-        # FIX: Yield stream_start directly from handler (no nested generator)
-        yield {
-            "type": "stream_start",
-            "request_id": request_id,
-            "text": text,
-            "voice": voice,
-            "sampling_rate": tts_service.sampling_rate  # Use actual sampling rate
-        }
+        # FAITHFUL REPLICATION: Replace text_to_speech_simulator with audio_chunks_generator
+        for audio_chunk in tts_service.audio_chunks_generator(text, voice, play_steps_in_s, request_id):
+            yield {"status": "processing", "chunk": audio_chunk}  # SAME STRUCTURE AS TEXT
         
-        chunk_count = 0
-        logging.info(f"🔍 [{request_id}] Starting synthesis loop...")
-        
-        # FIX: Iterate directly and yield from handler (flattened pattern)
-        for wav_chunk in tts_service.stream_synthesis(text, voice, play_steps_in_s, request_id):
-            chunk_count += 1
-            yield {
-                "type": "audio_chunk",
-                "chunk_id": chunk_count,
-                "audio_data": wav_chunk.hex(),  # Convert bytes to hex
-                "request_id": request_id
-            }
-        
-        yield {
-            "type": "stream_complete", 
-            "request_id": request_id,
-            "total_chunks": chunk_count
-        }
+        yield {"status": "completed", "message": "Audio synthesis completed"}  # SAME AS TEXT
         
     except Exception as e:
         logging.error(f"Handler error: {e}")
