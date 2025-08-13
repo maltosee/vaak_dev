@@ -61,7 +61,17 @@ class StreamingTTSService:
         self.device = None
         self.sampling_rate = None
         self.torch_dtype = None # Added to store dtype for autocast
+        self.token_per_word=100
         
+    
+    # Add this function to estimate tokens needed:
+    def estimate_tokens_needed(self, text: str) -> int:
+        """Estimate tokens based on text length"""
+        words = len(text.split())
+        # Rough estimate: ~50-80 tokens per word for Indic languages
+        estimated_tokens = words * self.token_per_word
+        return max(50, min(estimated_tokens, 2000))  # Clamp between 50-1000
+    
     @modal.enter()
     def load_model(self):
         import torch
@@ -179,6 +189,10 @@ class StreamingTTSService:
             text_tokens = self.tokenizer(chunk, return_tensors="pt").to(self.device)
             desc_tokens = self.desc_tokenizer(voice_description, return_tensors="pt").to(self.device)
             
+            estimated_tokens = self.estimate_tokens_needed(chunk)
+            logger.info(f"🔍 [{request_id}] Batch chunk {i+1}: '{chunk}' ({len(chunk.split())} words)")
+            logger.info(f"🔍 [{request_id}] Batch estimated tokens: {estimated_tokens}")
+            
             # HF-style generation parameters
             generation_kwargs = {
                 "input_ids": desc_tokens.input_ids,
@@ -187,8 +201,13 @@ class StreamingTTSService:
                 "prompt_attention_mask": text_tokens.attention_mask,
                 "do_sample": True,
                 "temperature": 1.0,                   # ✅ HF uses temperature
-                "return_dict_in_generate": True
+                "return_dict_in_generate": True,
+                "min_new_tokens": 5, 
+                "max_new_tokens": self.estimate_tokens_needed(chunk)  # ✅ ADD THIS LINE
             }
+            
+            logger.info(f"🔍 [{request_id}] Batch generation config: min=5, max={estimated_tokens}")
+
             
             with torch.autocast(device_type=self.device, dtype=self.torch_dtype):
                 generation = self.model.generate(**generation_kwargs)
@@ -201,8 +220,13 @@ class StreamingTTSService:
                 logger.error(f"❌ [{request_id}] Generation missing sequences for chunk {i+1}")
                 continue
                 
+            
+            
+
             all_audio_chunks.append(audio_numpy)
+            logger.info(f"🔍 [{request_id}] Batch chunk {i+1} generated audio: {len(audio_numpy)} samples")
             logger.info(f"✅ [{request_id}] Chunk {i+1} audio: {audio_numpy.shape}, Duration: {len(audio_numpy)/self.sampling_rate:.3f}s")
+            
         
         # Concatenate all chunks with silence padding
         if not all_audio_chunks:
@@ -235,88 +259,102 @@ class StreamingTTSService:
         import numpy as np
         import soundfile as sf
         import io
-        import time  # ← ADD THIS LINE
+        import time
         from parler_tts import ParlerTTSStreamer
         
         logger = logging.getLogger(__name__)
-        logger.info(f"🎵 [{request_id}] Starting synthesis: '{text[:50]}...'")
+        logger.info(f"🎵 [{request_id}] Starting streaming synthesis: '{text[:50]}...'")
         
-        logger.info(f"🔍 [{request_id}] Audio config - Rate: {self.sampling_rate}Hz, Channels: 1")
+        # ✅ ADD CHUNKING
+        text_chunks = self.chunk_text(text, max_words=20)
+        logger.info(f"📝 [{request_id}] Split into {len(text_chunks)} chunks for streaming")
         
         voice_description = VOICE_CONFIGS.get(voice_key, VOICE_CONFIGS["aryan_default"])
         
-        # Tokenization
-        text_tokens = self.tokenizer(text, return_tensors="pt").to(self.device)
-        desc_tokens = self.desc_tokenizer(voice_description, return_tensors="pt").to(self.device)
-        
-        logger.info(f"🔍 [{request_id}] Text tokens: {text_tokens.input_ids.shape}")
-        
-        # Setup streaming
-        frame_rate = self.model.audio_encoder.config.frame_rate
-        play_steps = int(frame_rate * play_steps_in_s)
-        streamer = ParlerTTSStreamer(self.model, device=self.device, play_steps=play_steps)
-        
-       # REPLACE in stream_synthesis():
-        generation_kwargs = {
-            "input_ids": desc_tokens.input_ids,
-            "attention_mask": desc_tokens.attention_mask,
-            "prompt_input_ids": text_tokens.input_ids,
-            "prompt_attention_mask": text_tokens.attention_mask,
-            "streamer": streamer,
-            "do_sample": False,        
-            "min_new_tokens": 5,       
-            "max_new_tokens": 1000,    
-            # ❌ REMOVE: "early_stopping": True,  # Causes conflict with num_beams=1
-        }
-        
-        # ADD in stream_synthesis() before generation:
-        torch.cuda.empty_cache()  # Clear GPU memory cache
-        
-        # --- OPTIMIZATION 1: Mixed Precision (FP16) Inference Context ---
-        # This context manager ensures operations within it use the specified dtype (e.g., float16)
-        # It's safe because if self.device is "cpu", it will default to float32.
-        with torch.autocast(device_type=self.device, dtype=self.torch_dtype):
-            # Start generation thread
-            thread = Thread(target=self.model.generate, kwargs=generation_kwargs)
-            thread.start()
+        # ✅ PROCESS EACH CHUNK SEQUENTIALLY
+        for chunk_idx, chunk in enumerate(text_chunks):
+            logger.info(f"🔄 [{request_id}] Streaming chunk {chunk_idx+1}/{len(text_chunks)}: '{chunk[:30]}...'")
             
-            # Stream chunks
-            chunk_count = 0
+            # Tokenization for this chunk
+            text_tokens = self.tokenizer(chunk, return_tensors="pt").to(self.device)
+            desc_tokens = self.desc_tokenizer(voice_description, return_tensors="pt").to(self.device)
             
-            try:
-                chunk_send_times = []  # Track exact send times
-                for audio_chunk in streamer:
-                    if audio_chunk.shape[0] == 0:
-                        break
+            # ✅ ADD HERE:
+            estimated_tokens = self.estimate_tokens_needed(chunk)
+            logger.info(f"🔍 [{request_id}] Text: '{chunk}' ({len(chunk.split())} words)")
+            logger.info(f"🔍 [{request_id}] Estimated tokens needed: {estimated_tokens}")
+            
+            # Setup streaming for this chunk
+            frame_rate = self.model.audio_encoder.config.frame_rate
+            play_steps = int(frame_rate * play_steps_in_s)
+            streamer = ParlerTTSStreamer(self.model, device=self.device, play_steps=play_steps)
+            
+            generation_kwargs = {
+                "input_ids": desc_tokens.input_ids,
+                "attention_mask": desc_tokens.attention_mask,
+                "prompt_input_ids": text_tokens.input_ids,
+                "prompt_attention_mask": text_tokens.attention_mask,
+                "streamer": streamer,
+                "do_sample": True,        # ✅ Updated to match batch
+                "temperature": 1.0,       # ✅ Added temperature
+                "min_new_tokens": 5,       
+                "max_new_tokens": self.estimate_tokens_needed(chunk),    
+            }
+            
+            # ✅ ADD HERE:
+            logger.info(f"🔍 [{request_id}] Generation config: min={generation_kwargs['min_new_tokens']}, max={generation_kwargs['max_new_tokens']}")
+            
+            torch.cuda.empty_cache()
+            
+            with torch.autocast(device_type=self.device, dtype=self.torch_dtype):
+                thread = Thread(target=self.model.generate, kwargs=generation_kwargs)
+                thread.start()
+                
+                # ✅ ADD THIS LINE before the streaming loop starts:
+                chunk_count = 0
+                total_samples = 0 
+                
+                try:
+                    for audio_chunk in streamer:
+                        if audio_chunk.shape[0] == 0:
+                            logger.info(f"🔍 [{request_id}] Streamer stopped yielding - chunk {chunk_count}")
+                            break
+                            
+                        chunk_count += 1  # ✅ Increment counter
+                        total_samples += audio_chunk.shape[0]  # ✅ Add this line
+                            
+                        # Convert to WAV and yield
+                        audio_float32 = audio_chunk.astype(np.float32)
+                        buffer = io.BytesIO()
+                        sf.write(buffer, audio_float32, self.sampling_rate, format='WAV')
+                        buffer.seek(0)
+                        wav_bytes = buffer.read()
                         
-                    chunk_count += 1
+                        logger.info(f"🔍 [{request_id}] Chunk {chunk_count}: {audio_chunk.shape[0]} samples")  # ✅ Add this
+                        
+                        yield wav_bytes
+                        
+                finally:
+                    thread.join()
                     
-                    # Convert to WAV
-                    audio_float32 = audio_chunk.astype(np.float32)
-                    buffer = io.BytesIO()
-                    sf.write(buffer, audio_float32, self.sampling_rate, format='WAV')
-                    buffer.seek(0)
-                    wav_bytes = buffer.read()
-                    
-                    logger.info(f"🔍 [{request_id}] Chunk audio shape: {audio_chunk.shape}, Duration: {len(audio_chunk)/self.sampling_rate:.3f}s")
-                    
-                    # DIAGNOSTIC: Record exact send time
-                    send_time = time.time()
-                    chunk_send_times.append(send_time)
-                    
-                    logger.info(f"📤 [{request_id}] Chunk {chunk_count}: {len(wav_bytes)} bytes at {send_time:.3f}")
-                    
-                    # DIAGNOSTIC: Calculate gap from previous chunk
-                    if len(chunk_send_times) > 1:
-                        gap = send_time - chunk_send_times[-2]
-                        logger.info(f"⏱️ [{request_id}] Gap since last chunk: {gap:.3f}s")
-                    
-                    
-                    yield wav_bytes
-                    
-            finally:
-                thread.join()
-                logger.info(f"✅ [{request_id}] Complete: {chunk_count} chunks")
+                    # ✅ ADD HERE:
+                    logger.info(f"🔍 [{request_id}] Streaming complete: {chunk_count} audio chunks generated")
+                    logger.info(f"🔍 [{request_id}] Total tokens likely generated: ~{chunk_count * play_steps}")
+                    logger.info(f"🔍 [{request_id}] Expected tokens: {estimated_tokens}")
+                    logger.info(f"🔍 [{request_id}] Streaming total: {total_samples} samples across {chunk_count} chunks")  # ✅ Add this
+            
+            # ✅ ADD BRIEF SILENCE BETWEEN TEXT CHUNKS
+            if chunk_idx < len(text_chunks) - 1:  # Not the last chunk
+                silence_duration = 0.1  # 100ms silence
+                silence_samples = int(silence_duration * self.sampling_rate)
+                silence_audio = np.zeros(silence_samples, dtype=np.float32)
+                
+                buffer = io.BytesIO()
+                sf.write(buffer, silence_audio, self.sampling_rate, format='WAV')
+                buffer.seek(0)
+                yield buffer.read()
+        
+        logger.info(f"✅ [{request_id}] Streaming complete: {len(text_chunks)} text chunks processed")
 
 
 # In streaming_sanskrit_tts_optimized.py
