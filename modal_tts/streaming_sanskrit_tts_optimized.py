@@ -117,7 +117,41 @@ class StreamingTTSService:
 
         logger.info(f"✅ TTS model loaded and initialized on {self.device}")
         
-    
+    def chunk_text(self, text: str, max_words: int = 20) -> list:
+        """Adaptive chunking based on word count - Indic Parler TTS recommendation"""
+        import re
+        
+        words = text.split()
+        if len(words) <= max_words:
+            return [text]  # No chunking needed
+        
+        # Split by sentences first, using both markers
+        sentences = re.split(r'[।|\.]+', text)
+        chunks = []
+        current_chunk = ""
+        current_word_count = 0
+        
+        for sentence in sentences:
+            sentence = sentence.strip()
+            if not sentence:
+                continue
+                
+            sentence_words = len(sentence.split())
+            
+            # If adding this sentence exceeds word limit, save current chunk
+            if current_word_count + sentence_words > max_words and current_chunk:
+                chunks.append(current_chunk.strip())
+                current_chunk = sentence
+                current_word_count = sentence_words
+            else:
+                current_chunk += (" " + sentence if current_chunk else sentence)
+                current_word_count += sentence_words
+        
+        # Add final chunk
+        if current_chunk.strip():
+            chunks.append(current_chunk.strip())
+        
+        return chunks
     
     @modal.method()
     def batch_synthesis(self, text: str, voice_key: str, request_id: str):
@@ -127,43 +161,70 @@ class StreamingTTSService:
         import io
         import time
 
-        
         logger = logging.getLogger(__name__)
         logger.info(f"🎵 [{request_id}] BATCH synthesis: '{text[:50]}...'")
         
+        # Chunk the text
+        text_chunks = self.chunk_text(text, max_words=20)  # ✅ Explicit parameter
+        logger.info(f"📝 [{request_id}] Split into {len(text_chunks)} chunks")
+        
         voice_description = VOICE_CONFIGS.get(voice_key, VOICE_CONFIGS["aryan_default"])
+        all_audio_chunks = []
         
-        # Tokenization
-        text_tokens = self.tokenizer(text, return_tensors="pt").to(self.device)
-        desc_tokens = self.desc_tokenizer(voice_description, return_tensors="pt").to(self.device)
+        # Process each chunk
+        for i, chunk in enumerate(text_chunks):
+            logger.info(f"🔄 [{request_id}] Processing chunk {i+1}/{len(text_chunks)}: '{chunk[:30]}...'")
+            
+            # Tokenization for this chunk
+            text_tokens = self.tokenizer(chunk, return_tensors="pt").to(self.device)
+            desc_tokens = self.desc_tokenizer(voice_description, return_tensors="pt").to(self.device)
+            
+            # HF-style generation parameters
+            generation_kwargs = {
+                "input_ids": desc_tokens.input_ids,
+                "attention_mask": desc_tokens.attention_mask,
+                "prompt_input_ids": text_tokens.input_ids,
+                "prompt_attention_mask": text_tokens.attention_mask,
+                "do_sample": True,
+                "temperature": 1.0,                   # ✅ HF uses temperature
+                "return_dict_in_generate": True
+            }
+            
+            with torch.autocast(device_type=self.device, dtype=self.torch_dtype):
+                generation = self.model.generate(**generation_kwargs)
+            
+            # Extract audio using HF method
+            if hasattr(generation, 'sequences') and hasattr(generation, 'audios_length'):
+                audio = generation.sequences[0, :generation.audios_length[0]]
+                audio_numpy = audio.to(torch.float32).cpu().numpy().squeeze()
+            else:
+                logger.error(f"❌ [{request_id}] Generation missing sequences for chunk {i+1}")
+                continue
+                
+            all_audio_chunks.append(audio_numpy)
+            logger.info(f"✅ [{request_id}] Chunk {i+1} audio: {audio_numpy.shape}, Duration: {len(audio_numpy)/self.sampling_rate:.3f}s")
         
-        # Generate with HF-style parameters
-        generation_kwargs = {
-            "input_ids": desc_tokens.input_ids,
-            "attention_mask": desc_tokens.attention_mask,
-            "prompt_input_ids": text_tokens.input_ids,
-            "prompt_attention_mask": text_tokens.attention_mask,
-            "do_sample": True,                    # ✅ Changed from False
-            "return_dict_in_generate": True       # ✅ Added this critical parameter
-        }
-        
-        with torch.autocast(device_type=self.device, dtype=self.torch_dtype):
-            generation = self.model.generate(**generation_kwargs)
-        
-        # Extract audio using HF method - CRITICAL FIX
-        if hasattr(generation, 'sequences') and hasattr(generation, 'audios_length'):
-            audio = generation.sequences[0, :generation.audios_length[0]]  # ✅ Extract exact length
-            audio_numpy = audio.to(torch.float32).cpu().numpy().squeeze()
-        else:
-            logger.error("Generation missing sequences or audios_length")
+        # Concatenate all chunks with silence padding
+        if not all_audio_chunks:
+            logger.error(f"❌ [{request_id}] No audio chunks generated")
             return None
         
-        logger.info(f"🔍 [{request_id}] Complete audio shape: {audio_numpy.shape}, Duration: {len(audio_numpy)/self.sampling_rate:.3f}s")
+        # Add silence between chunks (0.1 second)
+        silence_samples = int(0.1 * self.sampling_rate)
+        silence = np.zeros(silence_samples, dtype=np.float32)
         
+        final_audio = all_audio_chunks[0]
+        for chunk in all_audio_chunks[1:]:
+            final_audio = np.concatenate([final_audio, silence, chunk])
+        
+        logger.info(f"🔗 [{request_id}] Final concatenated audio: {final_audio.shape}, Duration: {len(final_audio)/self.sampling_rate:.3f}s")
+        
+        # Convert to WAV
         buffer = io.BytesIO()
-        sf.write(buffer, audio_numpy.astype(np.float32), self.sampling_rate, format='WAV')
+        sf.write(buffer, final_audio.astype(np.float32), self.sampling_rate, format='WAV')
         buffer.seek(0)
         return buffer.read()
+
     
     
     
