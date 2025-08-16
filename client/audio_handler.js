@@ -54,8 +54,8 @@ class AudioHandler {
 	  }
 
 	  this.vadEndDelayMs = serverConfig.vadEndDelayMs;
-	  this.audioMinDurationMs = parseInt(serverConfig.audioConfig?.minDuration) || 1500;
-	  this.sampleRate = parseInt(serverConfig.audioConfig?.sampleRate);
+	  this.audioMinDurationMs = parseInt(serverConfig.audioConfig.minDuration) || 1500;
+	  this.sampleRate = parseInt(serverConfig.audioConfig.sampleRate);
 
 	  this.vadConfig = {
 		positiveSpeechThreshold: serverConfig.vadConfig.positiveSpeechThreshold,
@@ -119,7 +119,7 @@ onSpeechStart() {
 		  // ✅ ADD: Duration filter for nonsense utterances
 		  const durationMs = (samples.length / 16000) * 1000; // Assuming 16kHz sample rate
 		  if (durationMs < this.audioMinDurationMs) { // Filter out utterances shorter than 0.5 seconds
-			console.log(`⏱️ Skipping short utterance (${Math.round(durationMs)}ms < 500ms)`);
+			console.log(`⏱️ Skipping short utterance (${Math.round(durationMs)}ms < ${Math.round(this.audioMinDurationMs)}ms)`);
 			this.isRecording = false;
 			this.updateUIState('listening');
 			return;

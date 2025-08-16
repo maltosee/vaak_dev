@@ -1,4 +1,4 @@
-const CONFIG = {
+export const CONFIG = {
   WEBSOCKET_URL: {
     development: 'ws://localhost:8080',
     production: 'wss://sanskrit-tutor-backend.fly.dev'
