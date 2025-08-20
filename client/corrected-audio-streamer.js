@@ -48,9 +48,6 @@ export class CorrectedAudioStreamer extends EventTarget {
         this.endOfAudio = false;
         this.isCollecting = true;
         
-        // WebSocket timeout (only after first chunk)
-        this.wsTimeoutTimer = null;
-        this.hasReceivedFirstChunk = false;
         
         this.logger('Initialized corrected audio streamer');
     }
@@ -85,6 +82,12 @@ export class CorrectedAudioStreamer extends EventTarget {
             throw error;
         }
     }
+	
+	// In corrected-audio-streamer.js:
+	setApp(app) {
+	  this.app = app;
+	  this.logger('App reference set for barge-in capability');
+	}
 
     setEstimatedDuration(durationMs) {
         this.estimatedDurationMs = durationMs;
@@ -253,11 +256,6 @@ export class CorrectedAudioStreamer extends EventTarget {
     async addChunk(arrayBuffer, sequence = null) {
         
 		console.log(`🔍 FLOW: addChunk() ENTRY - sequence=${sequence}`);
-
-		if (!this.isActive || !this.isCollecting) {
-            this.logger(`Chunk rejected - not collecting (active: ${this.isActive}, collecting: ${this.isCollecting})`, 'warning');
-            return false;
-        }
 		
 		console.log(`🔍 FLOW: addChunk() PROCESSING - sequence=${sequence}`);
 
@@ -292,14 +290,7 @@ export class CorrectedAudioStreamer extends EventTarget {
 				
 				console.log(`🔍 FLOW: counters updated - chunksReceived=${this.chunksReceived}, totalDurationMs=${this.totalDurationMs}`);
 
-				// Start WebSocket timeout after first chunk
-				if (!this.hasReceivedFirstChunk) {
-					this.hasReceivedFirstChunk = true;
-					this.startWebSocketTimeout();
-				} else {
-					this.resetWebSocketTimeout();
-				}
-
+				
 				// Dispatch buffer update
 				this.dispatchEvent(new CustomEvent('bufferUpdate', {
 					detail: {
@@ -347,6 +338,12 @@ export class CorrectedAudioStreamer extends EventTarget {
 						this.logger(`BATCH: Accumulating chunk ${sequence} (${this.audioChunks.length} total)`);
 					}
 				}
+				
+				// After successful chunk processing, check completion again
+				if (this.streamComplete) {
+					this.checkStreamCompletion();
+				}
+				
 				console.log(`🔍 FLOW: addChunk() COMPLETE - sequence=${sequence}`);
 				return true;
 
@@ -354,6 +351,8 @@ export class CorrectedAudioStreamer extends EventTarget {
 				this.logger(`Failed to process chunk ${sequence}: ${error.message}`, 'error');
 				return false;
 		}
+		
+		
     }
 
     onStreamComplete(totalChunks) {
@@ -362,41 +361,71 @@ export class CorrectedAudioStreamer extends EventTarget {
         
         this.logger(`Stream complete signal - expecting ${totalChunks} total chunks (have ${this.chunksReceived})`);
 		
-		// Flush remaining buffer even if < 5s
-		if (this.audioChunks.length > 0) {
-			this.flushBufferToPlayback();
-		}
-		
-		// Set end of stream flag
-		this.endOfStream = true;
+		this.startGracePeriodTimer();
         
         this.checkStreamCompletion();
     }
+	
+	
+	startGracePeriodTimer() {
+		this.clearGracePeriodTimer();
+		this.gracePeriodTimer = setTimeout(() => {
+			this.logger(`Grace period expired - forcing completion with ${this.chunksReceived}/${this.expectedTotalChunks} chunks`, 'warning');
+			this.forceCompletion();
+		}, 2000); // 2 second grace period
+	}
+	
+	forceCompletion() {
+	  console.log('🔄 FORCE COMPLETION: Cleaning up interrupted stream');
+	  this.clearGracePeriodTimer();
+	  this.finalizeStream();
+	}
+
+	clearGracePeriodTimer() {
+		if (this.gracePeriodTimer) {
+			clearTimeout(this.gracePeriodTimer);
+			this.gracePeriodTimer = null;
+		}
+	}
+	
 
     checkStreamCompletion() {
         if (this.streamComplete && this.expectedTotalChunks && 
             this.chunksReceived >= this.expectedTotalChunks) {
             
-            this.logger(`All ${this.expectedTotalChunks} chunks received - finalizing`);
-            this.endOfAudio = true;
-            this.isCollecting = false;
-            this.clearWebSocketTimeout();
-            
-            if (this.audioChunks.length > 0) {
-                if (!this.modeSet) {
-                    this.logger('Mode not set but stream complete - defaulting to BATCH mode', 'warning');
-                    this.isStreamingMode = false;
-                }
-                this.flushBufferToPlayback();
-            } else {
-                this.finalizeStream();
-            }
+            this.clearGracePeriodTimer();
+			this.logger(`All ${this.expectedTotalChunks} chunks received - finalizing`);
+			
+				// NOW it's safe to flush remaining buffer
+			if (this.audioChunks.length > 0) {
+				this.flushBufferToPlayback();
+			} else {
+				this.finalizeStream();
+			}
+		   
         }
     }
 	
 	async flushBufferToPlayback() {
 		
 		console.log(`🎯 FLUSH: flushBufferToPlayback() called with ${this.audioChunks.length} chunks, ${this.bufferDurationMs}ms buffer`);
+		
+		console.log(`🎯 FLUSH: TTS playing - VAD state:`, this.app?.audioHandler?.isVadListening);
+		console.log(`🎯 FLUSH: User listening state:`, this.app?.isListening);
+		console.log(`🎯 FLUSH: Allow barge-in:`, this.app?.allowBargeInImmediate);
+
+		// Force VAD restart if needed for barge-in
+		if (this.app?.allowBargeInImmediate && !this.app?.audioHandler?.isVadListening) {
+		  console.log(`🎤 FLUSH: Restarting VAD for barge-in detection`);
+		  this.app.audioHandler.startListening();
+		}
+		
+		
+		console.log(`🎯 FLUSH: Audio context state:`, this.audioContext?.state);
+		console.log(`🎯 FLUSH: this.app exists:`, !!this.app);
+		console.log(`🎯 FLUSH: audioHandler exists:`, !!this.app?.audioHandler);
+		console.log(`🎯 FLUSH: VAD initialized:`, this.app?.audioHandler?.isVadInitialized);
+		
 		
 		if (this.audioChunks.length === 0) return;
 		
@@ -447,34 +476,6 @@ export class CorrectedAudioStreamer extends EventTarget {
 		this.logger(`Flushed buffer to playback, reset counter to 0`);
 	}
 	
-    startWebSocketTimeout() {
-			this.clearWebSocketTimeout();
-			this.wsTimeoutTimer = setTimeout(() => {
-				this.logger(`WebSocket timeout - no message for ${this.config.websocketTimeoutMs}ms after first chunk`, 'warning');
-				this.endOfAudio = true;
-				this.isCollecting = false;
-				
-				if (this.audioChunks.length > 0) {
-					this.flushBufferToPlayback(); // Updated method name
-				} else {
-					this.finalizeStream();
-				}
-				
-			}, this.config.websocketTimeoutMs);
-	}
-
-    resetWebSocketTimeout() {
-        if (this.hasReceivedFirstChunk) {
-            this.startWebSocketTimeout();
-        }
-    }
-
-    clearWebSocketTimeout() {
-        if (this.wsTimeoutTimer) {
-            clearTimeout(this.wsTimeoutTimer);
-            this.wsTimeoutTimer = null;
-        }
-    }
 
     setVolume(volume) {
         if (this.gainNode) {
@@ -503,17 +504,34 @@ export class CorrectedAudioStreamer extends EventTarget {
         return false;
     }
 
-    stopPlayback() {
-        if (this.currentSource) {
-            this.currentSource.stop();
-            this.currentSource = null;
-        }
-        this.isPlaying = false;
-        this.isCollecting = false;
-        this.clearWebSocketTimeout();
-        this.audioChunks = [];
-        this.bufferDurationMs = 0;
-    }
+	stopPlayback() {
+		  console.log("🎯 STREAMER STOP: currentSource exists:", !!this.currentSource, "isPlaying:", this.isPlaying);
+		  
+		  if (this.currentSource) {
+			try {
+			  this.currentSource.stop();
+			  this.currentSource.disconnect();
+			  console.log("🎯 STREAMER STOP: Audio source stopped and disconnected");
+			} catch (e) {
+			  console.log("🎯 STREAMER STOP: Source already stopped:", e.message);
+			}
+			this.currentSource = null;
+		  }
+		  
+		  this.isPlaying = false;
+		  this.isCollecting = false;
+		  
+		  // ADD THESE NEW LINES:
+		  this.clearGracePeriodTimer();
+		  this.streamComplete = false;
+		  this.expectedTotalChunks = null;
+		  // END NEW LINES
+		  
+		  this.audioChunks = [];
+		  this.bufferDurationMs = 0;
+		  
+		  console.log("🎯 STREAMER STOP: Complete - isPlaying:", this.isPlaying);
+	}
 
     reset() {
 		this.stopPlayback();
@@ -530,7 +548,7 @@ export class CorrectedAudioStreamer extends EventTarget {
 		this.isPlaying = false;
 		this.hasReceivedFirstChunk = false;
 		
-		this.clearWebSocketTimeout();
+		
 		
 		if (this.audioContext) {
 			this.nextPlayTime = this.audioContext.currentTime;
@@ -557,7 +575,6 @@ export class CorrectedAudioStreamer extends EventTarget {
             chunksReceived: this.chunksReceived,
             bufferDurationMs: this.bufferDurationMs,
             totalDurationMs: this.totalDurationMs,
-            hasReceivedFirstChunk: this.hasReceivedFirstChunk,
             contextState: this.audioContext?.state || 'unknown'
         };
     }

@@ -5,22 +5,66 @@ import { CorrectedAudioStreamer } from './corrected-audio-streamer.js';
 import { CONFIG } from './config.js';
 
 class EnhancedSanskritTutorApp {
-   constructor() {
-    this.ws = null;
-    this.audioHandler = null;
-    this.audioStreamer = null; // RENAMED from batchStreamer
-    this.isConnected = false;
-    this.isListening = false;
-    this.config = null;
-    this.reconnectAttempts = 0;
-    this.maxReconnectAttempts = 5;
-    this.reconnectDelay = 1000;
-    this.ttsPlaybackActive = false;
-    this.allowBargeInImmediate = false;
-    this.serverState = 'listening';
-    
-    console.log('🕉️ Enhanced Sanskrit Tutor App initialized');
-  }
+	   constructor() {
+		this.ws = null;
+		this.audioHandler = null;
+		this.audioStreamer = null; // RENAMED from batchStreamer
+		this.isConnected = false;
+		this.isListening = false;
+		this.config = null;
+		this.reconnectAttempts = 0;
+		this.maxReconnectAttempts = 5;
+		this.reconnectDelay = 1000;
+		this.ttsPlaybackActive = false;
+		this.allowBargeInImmediate = false;
+		this.clientState = 'listening';
+		this.graceTimeout = null;
+
+		
+		console.log('🕉️ Enhanced Sanskrit Tutor App initialized');
+	  }
+  
+  
+	  setState(newState, reason = '', timeoutMs = null) {
+			  console.log(`🔄 STATE: ${this.clientState} → ${newState} (${reason})`);
+			  
+			  // Clear existing timeout
+			  if (this.stateTimeout) {
+				clearTimeout(this.stateTimeout);
+				this.stateTimeout = null;
+			  }
+			  
+			  this.clientState = newState;
+			  this.ttsPlaybackActive = (newState === 'tts_playing');
+			  this.updateUIForState(newState);
+			  
+			  // Implement state actions
+			  if (newState === 'listening') {
+					this.audioHandler.startListening(); // Unblock VAD
+				// No timeout needed - this is the default state
+			  } 
+			  else 
+			  {
+					//this.audioHandler.stopListening(); // Block VAD
+					// Set timeout to auto-reset to listening (unless explicitly no timeout)
+					if (timeoutMs !== null && newState !== 'disconnected') {
+					  const gracePeriod = timeoutMs || this.config.ttsGracePeriodMs;
+					  this.stateTimeout = setTimeout(() => {
+						this.setState('listening', 'timeout');
+					  }, gracePeriod);
+					}
+			  }
+	  }
+
+	updateUIForState(state) {
+	  const statusMap = {
+		'listening': 'Listening...',
+		'processing': 'Processing...',
+		'tts_playing': 'Playing response...'
+	  };
+	  this.updateVoiceStatus(statusMap[state] || state);
+	}
+
 
 
  // 3. REPLACE INITIALIZE METHOD - NO HARDCODING
@@ -32,19 +76,73 @@ class EnhancedSanskritTutorApp {
 		  if (!response.ok) throw new Error(`Failed to fetch config: ${response.status}`);
 		  const config = await response.json();
 		  this.config = config;
-		  this.allowBargeInImmediate = config.allowBargeTTSPlaybackImmediate === true;
+		  this.allowBargeInImmediate = config.allowBargeTTSPlaybackImmediate !== false; // Default true unless explicitly false
 
 		  // Initialize audio handler
 		  this.audioHandler = new AudioHandler();
 		  this.audioHandler.setConfig(config);
-		  this.audioHandler.onAudioData = (audioBlob) => this.sendAudioToServer(audioBlob);
+		  this.audioHandler.onAudioData = (audioBlob) => {
+			  
+			  this.sendAudioToServer(audioBlob);
+			  this.setState('processing', 'audio_data', this.config.ttsGracePeriodMs); // ← ADD THIS
+		  };
 		  
+			// Enhanced barge-in with multiple detection methods
+		  // Test ALL possible speech detection methods
+			// REPLACE the existing onSpeechValidatedCallback setup:
 		  this.audioHandler.setOnSpeechValidatedCallback(() => {
-			if (this.ttsPlaybackActive && this.allowBargeInImmediate) {
-			  console.log("🛑 Speech validated – interrupting TTS");
-			  this.stopTTSPlayback();
-			}
-		  });
+				console.log("🎤 SPEECH VALIDATED - TTS Active:", this.ttsPlaybackActive, "Allow Barge:", this.allowBargeInImmediate);
+				
+				// ✅ ADD THIS BLOCK FIRST:
+				if (this.clientState !== 'listening' && !this.ttsPlaybackActive) 
+				{
+					console.log("🚫 Speech blocked - server busy, not TTS");
+					this.showFlashMessage('Server busy processing, please wait...', 'warning', 1500);
+					return false; // Block VAD early
+				}
+				if(this.clientState == 'tts_interrupted')
+				{
+					console.log("🚫 TTS interrupted no audio will be processed till all remaining playback is completed.. please wait");
+					this.showFlashMessage('no audio will be processed till all remaining playback is completed.. please wait', 'warning', 1500);
+					return false; // Block VAD early
+				}
+				if(this.clientState == 'disconnected')
+				{
+					console.log("🚫 Disconnected from server.. attempting to reconnect");
+					this.showFlashMessage('Disconnected from server please wait for reconnection',1500);
+					return false; // Block VAD early
+				}
+				
+				if (this.ttsPlaybackActive && this.allowBargeInImmediate) {
+					console.log("🛑 BARGE-IN: Speech detected during TTS");
+					this.setState('tts_interrupted', 'tts_barge_in', this.config.ttsGracePeriodMs); // ← ADD THIS
+					// Show user feedback
+					this.showFlashMessage('Stopping playback, please wait audio will be enabled after existing playback completes...', 'info', 2000);
+					
+					// Signal server to stop
+					if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+						
+							console.log("🛑 Sending tts_interrupt to server");  // ← KEEP THIS SIMPLE LOG
+							this.ws.send(JSON.stringify({
+								type: 'tts_interrupt',
+								reason: 'user_speech_detected'
+							}));
+					}
+					else {
+								console.log("🛑 WebSocket not ready:", {
+									exists: !!this.ws,
+									readyState: this.ws?.readyState
+								});
+					}
+							
+					// Show user feedback
+					this.showFlashMessage('Stopping playback, please wait audio will be enabled after existing playback completes...', 'info', 2000);
+					return false; // 🎯 KEY: Discard this audio, block VAD
+				}
+				
+				
+				return true; // Allow normal processing
+		   });
 
 		  // CORRECTED: Initialize with all required config from server - NO HARDCODING
 		  const streamerConfig = {
@@ -63,11 +161,26 @@ class EnhancedSanskritTutorApp {
 			streamerConfig,
 			(msg, level = 'info') => console.log(`[AudioStreamer] ${msg}`)
 		  );
+		  
+		  // ADD THIS LINE:
+		  this.audioStreamer.setApp(this); // Pass app reference
 
 		  // Setup event handlers
 		  this.setupStreamerEventHandlers();
 
 		  await this.initializeAudio();
+		  
+		  // After: await this.initializeAudio();
+		  console.log('🔍 VAD DEBUG - Available properties:', Object.keys(this.audioHandler));
+		  console.log('🔍 VAD DEBUG - AudioHandler methods:', Object.getOwnPropertyNames(Object.getPrototypeOf(this.audioHandler)));
+		  console.log('🔍 VAD DEBUG - Current state:', {
+			  isListening: this.audioHandler.isListening,
+			  isVadListening: this.audioHandler.isVadListening,
+			  vadActive: this.audioHandler.vadActive,
+			  listening: this.audioHandler.listening
+		  });
+		  
+		  
 		  console.log('✅ App initialization completed');
 		} catch (error) {
 		  console.error('❌ App initialization failed:', error);
@@ -115,88 +228,99 @@ class EnhancedSanskritTutorApp {
 		});
 
 		this.audioStreamer.addEventListener('streamFinalized', (e) => {
+			this.clearStreamCompletionTimeout(); // ADD THIS LINE at the start
 			const { chunksReceived, totalDurationMs, mode } = e.detail;
 			console.log(`🎵 Stream finalized (${mode}): ${chunksReceived} chunks, ${(totalDurationMs/1000).toFixed(1)}s total`);
 			
-			// CRITICAL: Complete pipeline - return to listening state
-			this.serverState = 'listening';
-			this.ttsPlaybackActive = false;
-			this.updateVoiceStatus('Listening...');
-			this.enableUIControls();
 			
-			// Resume VAD if user was listening
-			if (this.isListening) {
-				this.audioHandler.startListening();
-			}
-		});
-		
-		this.audioStreamer.addEventListener('pipelineComplete', (e) => {
-				console.log(`🔄 Pipeline complete: ${e.detail.reason}`);
-				
-				// CRITICAL: Return to listening state
-				this.serverState = 'listening';
-				this.ttsPlaybackActive = false;
-				
-				if (this.isListening) {
-					this.audioHandler.startListening(); // Resume VAD
-				}
-				
-				this.updateVoiceStatus('Listening...');
+			this.setState('listening', 'stream_finalized'); // ← REPLACE entire block with this
+			this.enableUIControls();
 		});
 		
 		
   }
 
   async connect() {
-    try {
-      const wsUrl = this.config.websocketUrl;
-      console.log('🔌 Connecting to WebSocket:', wsUrl);
-      this.ws = new WebSocket(wsUrl);
-      this.setupWebSocketHandlers();
-      
-      await new Promise((resolve, reject) => {
-        this.ws.onopen = resolve;
-        this.ws.onerror = reject;
-        setTimeout(() => reject(new Error('Connection timeout')), 10000);
-      });
-
-      console.log('✅ Connected successfully');
-      this.showStatus('Connected to Sanskrit Tutor', 'success');
-      
-    } catch (error) {
-      console.error('❌ Connection failed:', error);
-      this.showError('Failed to connect to server');
-      this.scheduleReconnect();
-    }
+		console.log('🔍 CONNECT() CALLED');
+		try {
+		  const wsUrl = this.config.websocketUrl;
+		  console.log('🔌 Connecting to WebSocket:', wsUrl);
+		  
+		  // Ensure clean state before connecting
+		  if (this.ws) {
+			this.ws.close();
+			this.ws = null;
+		  }
+		  
+		  
+		  this.ws = new WebSocket(wsUrl);
+		  this.setupWebSocketHandlers();
+		  
+		  /**await new Promise((resolve, reject) => {
+			this.ws.onopen = resolve;
+			this.ws.onerror = reject;
+			setTimeout(() => reject(new Error('Connection timeout')), 10000);
+		  });**/
+		
+		  console.log('✅ Connected successfully');
+		  this.showStatus('Connected to Sanskrit Tutor', 'success');
+		  console.log('Websocket status : ', this.isConnected);
+		} catch (error) {
+		  console.error('❌ Connection failed:', error);
+		  this.showError('Failed to connect to server');
+		  this.scheduleReconnect();
+		}
   }
 
   setupWebSocketHandlers() {
     this.ws.onopen = () => {
-      console.log('🔌 WebSocket connected');
+      console.log('🔌 WebSocket connected at:', new Date().toISOString());
       this.isConnected = true;
+	  console.log('🔌 Set isConnected to true');
       this.reconnectAttempts = 0;
       this.updateConnectionStatus(true);
+	  
+	  this.setState('listening', 'websocket_connected'); // ← ADD THIS
     };
     
     this.ws.onclose = (event) => {
-      console.log('🔌 WebSocket disconnected:', event.code, event.reason);
-      this.isConnected = false;
-      this.updateConnectionStatus(false);
-      if (!event.wasClean) {
-        this.scheduleReconnect();
-      }
+		  console.log('🔌 WebSocket CLOSED at:', new Date().toISOString(), 'Code:', event.code, 'Reason:', event.reason, 'Clean:', event.wasClean);
+		  this.isConnected = false;
+		  this.updateConnectionStatus(false);
+		  
+		  // Stop VAD and set error state
+		  //this.stopListening();
+		  //this.updateAudioStatus('error');
+		  
+		  
+		  // Clean up audio state
+		  this.cleanupAudioState();
+		  this.setState('disconnected', 'websocket_closed');
+		  
+		  if (!event.wasClean) {
+			this.scheduleReconnect();
+			this.setState('listening', 'websocket_closed'); // ← ADD THIS
+		  }
+		  
     };
     
     this.ws.onerror = (error) => {
-      console.error('❌ WebSocket error:', error);
-      this.showError('Connection error occurred');
+		  console.log('🔌 WebSocket ERROR at:', new Date().toISOString(), error);
+		  this.showError('Connection error occurred');
+		  // Stop VAD and set error state
+		  this.stopListening();
+		  this.updateAudioStatus('error');
+		  
+		  // Clean up audio state
+		  this.cleanupAudioState();
     };
+	
     
     this.ws.onmessage = async (event) => {
       if (typeof event.data === 'string') {
         try {
           const data = JSON.parse(event.data);
-          this.handleWebSocketJsonMessage(data);
+          await this.handleWebSocketJsonMessage(data);
         } catch (e) {
           console.error('❌ Failed to parse JSON message:', e);
         }
@@ -216,12 +340,13 @@ class EnhancedSanskritTutorApp {
 			case 'tts_stream_start':
 			  console.log(`📊 Received stream start:`, data.text || 'No text provided');
 			  this.startTTSStream();
+			  this.setState('tts_playing', 'tts_stream_start'); // ← ADD THIS
 			  break;
 			  
-			case 'tts_stream_complete':
-			  console.log(`✅ TTS streaming complete. Total chunks: ${data.total_chunks}`);
-			  this.handleStreamComplete(data.total_chunks);
-			  break;
+			case 'tts_stream_complete':				
+				this.handleStreamComplete(data.total_chunks);
+				this.setState('listening', 'tts_stream_complete'); 
+				break;
 			  
 			case 'connected':
 			  console.log('✅ Server connection confirmed');
@@ -231,11 +356,13 @@ class EnhancedSanskritTutorApp {
 			case 'error':
 			  console.error(`❌ Server error: ${data.message}`);
 			  this.handleErrorMessage(data);
+			  this.setState('listening', 'server error in websocket'); 
 			  break;
 			  
 			case 'llm_response':
 			  console.log(`🤖 Received LLM response: ${data.text}`);
 			  this.handleLLMResponse(data);
+			  this.setState('tts_starting', 'llm_response_received');
 			  break;
 			  
 			case 'status_update':
@@ -260,15 +387,23 @@ class EnhancedSanskritTutorApp {
   }
 
   // 5. REPLACE TTS STREAM START
-  startTTSStream() {
-		this.ttsPlaybackActive = true;
-		
-		// Reset and initialize streamer
-		this.audioStreamer.reset();
-		this.audioStreamer.initialize().then(() => {
-		  this.audioStreamer.startStream();
-		});
-  }
+
+	startTTSStream() {
+	  
+		  console.log("🎵 TTS STREAM STARTING ");
+		  
+		  // CRITICAL: Keep VAD running during TTS for barge-in
+		  //console.log("🎤 TTS START: VAD state before TTS:", this.audioHandler.isVadListening);
+		 // console.log("🎤 TTS START: Keeping VAD active for barge-in");
+		  
+		  // Reset and initialize streamer
+		  this.audioStreamer.reset();
+		  this.audioStreamer.initialize().then(() => {
+			this.audioStreamer.startStream();
+		  });
+		  
+
+	}
 
 
   // 7. REPLACE HANDLE AUDIO CHUNK
@@ -294,18 +429,37 @@ class EnhancedSanskritTutorApp {
 
   // 8. REPLACE HANDLE STREAM COMPLETE
   async handleStreamComplete(totalChunks) {
-    console.log(`✅ Stream complete: ${totalChunks} total chunks expected`);
-    this.audioStreamer.onStreamComplete(totalChunks);
-  }
-
- // 9. REPLACE STOP TTS PLAYBACK
-  stopTTSPlayback() {
-		if (this.audioStreamer) {
-		  this.audioStreamer.stopPlayback();
-		  this.ttsPlaybackActive = false;
-		}
+			if (!totalChunks || totalChunks <= 0) {
+				console.error('Invalid total_chunks received:', totalChunks);
+				this.forceStreamCleanup();
+				return;
+			}
+			
+			console.log(`✅ TTS streaming complete. Total chunks: ${totalChunks}`);
+			this.audioStreamer.onStreamComplete(totalChunks);
+			
+			const timeoutMs = this.config.audioConfig?.streamCompletionTimeoutMs || this.config.audioConfig?.websocketTimeoutMs;
+				  this.streamCompletionTimeout = setTimeout(() => {
+					this.forceStreamCleanup();
+			}, timeoutMs);
+  
   }
   
+	  forceStreamCleanup() {
+			this.clearStreamCompletionTimeout();
+			this.enableUIControls();
+	  }
+
+	clearStreamCompletionTimeout() {
+		if (this.streamCompletionTimeout) {
+			clearTimeout(this.streamCompletionTimeout);
+			this.streamCompletionTimeout = null;
+		}
+	}
+  
+  
+
+	
   // 6. ADD DURATION ESTIMATE HANDLER - REQUIRED FOR MODE DETERMINATION
   handleDurationEstimate(durationMs) {
     console.log(`🕐 Audio duration estimate: ${durationMs}ms`);
@@ -348,19 +502,21 @@ class EnhancedSanskritTutorApp {
   }
 
   sendAudioToServer(audioBlob) {
-    if (this.serverState !== 'listening') {
-      console.log('🚫 Audio blocked - server busy processing');
-      return;
-    }
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-      console.error('❌ Cannot send audio: WebSocket not connected');
-      return;
-    }
-    console.log(`📤 Sending audio to server: ${audioBlob.size} bytes`);
-    this.ws.send(audioBlob);
-	
-	this.serverState = 'processing'; // Block further audio
-	this.audioHandler.stopListening(); // Stop VAD
+	 
+		console.log('🔍 EXACT STATE: isConnected:', this.isConnected, 'ws exists:', !!this.ws, 'ws.readyState:', this.ws?.readyState, 'OPEN constant:', WebSocket.OPEN);
+
+		
+		if (!this.isConnected || !this.ws || this.ws.readyState !== WebSocket.OPEN) {
+			console.error('❌ Cannot send audio: WebSocket not connected');
+			this.stopListening();
+			this.updateAudioStatus('error');
+			this.showFlashMessage('Connection lost - stopping voice detection', 'error');
+			return;
+		}
+		
+		console.log(`📤 Sending audio to server: ${audioBlob.size} bytes`);
+		this.ws.send(audioBlob);
+
   }
 
   handleMicrophoneToggle() {
@@ -384,6 +540,7 @@ class EnhancedSanskritTutorApp {
       console.log('🎤 Starting speech detection...');
       await this.audioHandler.startListening();
       this.isListening = true;
+	  console.log('🔍 AFTER START LISTENING: isConnected =', this.isConnected); // ADD THIS
       this.updateMicrophoneButton(true);
       console.log('🎤 Started listening');
     } catch (error) {
@@ -405,17 +562,26 @@ class EnhancedSanskritTutorApp {
       console.error('❌ Failed to stop listening:', error);
     }
   }
+  
+  cleanupAudioState() {
+	  if (this.audioStreamer) {
+		this.audioStreamer.stopPlayback();
+		this.audioStreamer.reset();
+	  }
+	  this.clearStreamCompletionTimeout();
+  }
+
 
   handleTextInput(text) {
-    if (!text.trim()) return;
-    this.sendTextMessage({
-      type: 'text_input',
-      text: text.trim()
-    });
-    const textInput = document.getElementById('text-input');
-    if (textInput) {
-      textInput.value = '';
-    }
+		if (!text.trim()) return;
+		this.sendTextMessage({
+		  type: 'text_input',
+		  text: text.trim()
+		});
+		const textInput = document.getElementById('text-input');
+		if (textInput) {
+		  textInput.value = '';
+		}
   }
 
   sendPing() {
@@ -433,42 +599,55 @@ class EnhancedSanskritTutorApp {
       icon.className = isListening ? 'fas fa-microphone' : 'fas fa-microphone-slash';
     }
   }
+  
+  showFlashMessage(message, type = 'info', duration = 3000) {
+	  const flashElement = document.getElementById('flash-message');
+	  if (flashElement) {
+		flashElement.textContent = message;
+		flashElement.className = `flash-message ${type} show`;
+		
+		// Auto-hide after duration
+		setTimeout(() => {
+		  flashElement.classList.remove('show');
+		}, duration);
+	  }
+  }
 
   // Additional utility methods...
   displayUserTranscript(transcript, language) {
-    const messagesContainer = document.getElementById('messages');
-    if (!messagesContainer) return;
-    const transcriptDiv = document.createElement('div');
-    transcriptDiv.className = 'message user-transcript';
-    transcriptDiv.innerHTML = `
-      <div class="message-header">
-        <span class="speaker">You said</span>
-        <span class="language">(${this.getLanguageDisplayName(language)})</span>
-        <span class="timestamp">${new Date().toLocaleTimeString()}</span>
-      </div>
-      <div class="message-content">${this.escapeHtml(transcript)}</div>
-    `;
-    messagesContainer.appendChild(transcriptDiv);
-    this.scrollToBottom(messagesContainer);
-    console.log(`📝 Displayed user transcript: "${transcript}" (${language})`);
+	  console.log('🔍 DISPLAYING USER:', transcript);
+	  const messagesContainer = document.getElementById('messages');
+	  if (!messagesContainer) return;
+	  const transcriptDiv = document.createElement('div');
+	  transcriptDiv.className = 'message user-transcript';
+	  transcriptDiv.innerHTML = `
+		<div class="message-header">
+		  <span class="speaker">You said</span>
+		  <span class="language">(${this.getLanguageDisplayName(language)})</span>
+		  <span class="timestamp">${new Date().toLocaleTimeString()}</span>
+		</div>
+		<div class="message-content">${this.escapeHtml(transcript)}</div>
+	  `;
+	  messagesContainer.insertBefore(transcriptDiv, messagesContainer.firstChild); // Changed from appendChild
+	  console.log(`📝 Displayed user transcript: "${transcript}" (${language})`);
   }
 
-  displayAIResponse(text) {
-    const messagesContainer = document.getElementById('messages');
-    if (!messagesContainer) return;
-    const responseDiv = document.createElement('div');
-    responseDiv.className = 'message ai-response';
-    responseDiv.innerHTML = `
-      <div class="message-header">
-        <span class="speaker">Sanskrit Tutor</span>
-        <span class="timestamp">${new Date().toLocaleTimeString()}</span>
-      </div>
-      <div class="message-content">${this.escapeHtml(text)}</div>
-    `;
-    messagesContainer.appendChild(responseDiv);
-    this.scrollToBottom(messagesContainer);
-    console.log(`🤖 Displayed AI response: "${text}"`);
-  }
+ displayAIResponse(text) {
+	  console.log('🔍 DISPLAYING AI:', text);
+	  const messagesContainer = document.getElementById('messages');
+	  if (!messagesContainer) return;
+	  const responseDiv = document.createElement('div');
+	  responseDiv.className = 'message ai-response';
+	  responseDiv.innerHTML = `
+		<div class="message-header">
+		  <span class="speaker">Sanskrit Tutor</span>
+		  <span class="timestamp">${new Date().toLocaleTimeString()}</span>
+		</div>
+		<div class="message-content">${this.escapeHtml(text)}</div>
+	  `;
+	  messagesContainer.insertBefore(responseDiv, messagesContainer.firstChild); // Changed from appendChild
+	  console.log(`🤖 Displayed AI response: "${text}"`);
+ }
 
   getLanguageDisplayName(language) {
     const languageNames = {
@@ -487,9 +666,6 @@ class EnhancedSanskritTutorApp {
     return div.innerHTML;
   }
 
-  scrollToBottom(container) {
-    container.scrollTop = container.scrollHeight;
-  }
 
   handleLLMResponse(data) {
     console.log('🤖 Received LLM response:', data);
@@ -512,19 +688,27 @@ class EnhancedSanskritTutorApp {
       console.log(`⏱️ Total processing time: ${data.processingTime}ms`);
       this.updateProcessingTime(data.processingTime);
     }
+	
   }
 
   handleErrorMessage(data) {
     console.error('❌ Server error:', data.message);
     this.showError(data.message);
-    this.serverState = 'listening';
+
+	// Stop VAD on server errors
+    this.stopListening();
+    this.updateAudioStatus('error');
+	
+	// Full state cleanup on errors
+	this.cleanupAudioState();
+	
   }
 
   handleStatusUpdateMessage(data) {
     console.log(`ℹ️ Server Status Update: ${data.message} (Code: ${data.statusCode})`);
     this.showStatus(data.message, data.statusType || 'info');
     
-    this.serverState = data.statusCode === 'BUSY_SERVER' ? 'processing' : 'listening';
+    this.clientState = data.statusCode === 'BUSY_SERVER' ? 'processing' : 'listening';
     
     if (data.statusCode === 'BUSY_SERVER') {
       document.getElementById('voice-circle')?.style.setProperty('backgroundColor', 'orange');
@@ -549,9 +733,9 @@ class EnhancedSanskritTutorApp {
 
   scheduleReconnect() {
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      console.log('❌ Max reconnection attempts reached');
-      this.showError('Connection lost. Please refresh the page.');
-      return;
+		  console.log('❌ Max reconnection attempts reached');
+		  this.showError('Connection lost. Please refresh the page.');		  
+		  return;
     }
     this.reconnectAttempts++;
     const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1);
@@ -675,6 +859,7 @@ function setupEventListeners() {
             connectBtn.disabled = true;
             try {
                 await app.connect();
+				console.log('🔍 AFTER CONNECT: isConnected =', app.isConnected); // ADD THIS
                 showConversationSection(name);
             } catch (error) {
                 document.getElementById('auth-status').textContent = 'Connection failed';
@@ -710,12 +895,23 @@ function setupEventListeners() {
     const disconnectBtn = document.getElementById('disconnect-btn');
     if (disconnectBtn) {
         disconnectBtn.addEventListener('click', async () => {
-            await app.stopListening();
+            console.log('🔍 DISCONNECT CLICKED'); // ADD THIS LINE HERE
+			await app.stopListening();
             if (app.ws) {
                 app.ws.close();
                 app.ws = null;
             }
             app.isConnected = false;
+			
+			
+			// ADD THIS BLOCK:
+			const messagesContainer = document.getElementById('messages');
+			console.log('🔍 Messages before clear:', messagesContainer?.children.length);
+			if (messagesContainer) {
+				messagesContainer.innerHTML = '';
+				console.log('🔍 Messages after clear:', messagesContainer.children.length);
+			}
+			
             document.getElementById('conversation-section').classList.add('hidden');
             document.getElementById('auth-section').classList.remove('hidden');
             document.getElementById('connect-btn').disabled = false;

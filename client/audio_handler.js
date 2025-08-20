@@ -108,47 +108,55 @@ onSpeechStart() {
    * @param {Float32Array} samples - Audio samples
    */
   async onSpeechEnd(samples) {
-		console.log(`🎤 Speech ended - processing ${samples.length} samples`);
+			console.log(`🎤 Speech ended - processing ${samples.length} samples`);
+			
+			
+			  // ✅ ADD: Duration filter for nonsense utterances
+			  const durationMs = (samples.length / 16000) * 1000; // Assuming 16kHz sample rate
+			  if (durationMs < this.audioMinDurationMs) { // Filter out utterances shorter than 0.5 seconds
+				console.log(`⏱️ Skipping short utterance (${Math.round(durationMs)}ms < ${Math.round(this.audioMinDurationMs)}ms)`);
+				this.isRecording = false;
+				this.updateUIState('listening');
+				return;
+			  }
+			
+			
+			  // ✅ ADD VALIDATION CALLBACK CHECK HERE:
+			  if (this.onSpeechValidatedCallback) {
+					console.log('🔍 Calling speech validation callback');
+					const shouldProceed = this.onSpeechValidatedCallback();
+					console.log('🔍 Validation result:', shouldProceed);
+					if (shouldProceed === false) {
+					  console.log('🛑 Audio blocked by validation callback');
+					  this.isRecording = false;
+					  this.updateUIState('Listening');
+					  return;
+					}
+			  }
+			
 		
-		 // ✅ Barge-in TTS before duration check
-		  if (this.onSpeechValidatedCallback) {
-			this.onSpeechValidatedCallback();
-		  }
 		
-		
-		  // ✅ ADD: Duration filter for nonsense utterances
-		  const durationMs = (samples.length / 16000) * 1000; // Assuming 16kHz sample rate
-		  if (durationMs < this.audioMinDurationMs) { // Filter out utterances shorter than 0.5 seconds
-			console.log(`⏱️ Skipping short utterance (${Math.round(durationMs)}ms < ${Math.round(this.audioMinDurationMs)}ms)`);
-			this.isRecording = false;
-			this.updateUIState('listening');
-			return;
-		  }
-		
-		
-		//this.lastSpeechEndTime = Date.now(); // Track last speech end timestamp
-	
-	
-		// Clear any existing delay timeout
-		if (this.delayTimeoutId) {
-		  clearTimeout(this.delayTimeoutId);
-		}
-		
-		// Update UI to show processing state
-		this.updateUIState('processing');
-		
-		// Add configurable delay before processing
-		console.log(`⏳ Waiting ${this.vadEndDelayMs}ms before sending to server...`);
-		
-		this.delayTimeoutId = setTimeout(async () => {
-		  try {
-			await this.processAudioSamples(samples);
-		  } catch (error) {
-			console.error('❌ Audio processing error:', error);
-			this.updateUIState('error');
-		  }
-		}, this.vadEndDelayMs);
-  }
+			// Clear any existing delay timeout
+			if (this.delayTimeoutId) {
+			  clearTimeout(this.delayTimeoutId);
+			}
+			
+			// Update UI to show processing state
+			this.updateUIState('processing');
+			
+			
+			// Add configurable delay before processing
+			console.log(`⏳ Waiting ${this.vadEndDelayMs}ms before sending to server...`);
+			
+			this.delayTimeoutId = setTimeout(async () => {
+			  try {
+				await this.processAudioSamples(samples);
+			  } catch (error) {
+				console.error('❌ Audio processing error:', error);
+				this.updateUIState('error');
+			  }
+			}, this.vadEndDelayMs);
+   }
 
   /**
    * Process audio samples and send to server
