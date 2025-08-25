@@ -19,6 +19,14 @@ class EnhancedSanskritTutorApp {
 		this.allowBargeInImmediate = false;
 		this.clientState = 'listening';
 		this.graceTimeout = null;
+		this.tempUserData=null;
+		this.userSession = null; // ADD this line
+		this.phoneNumber = null; // ADD this line
+		
+		this.vadMuted = false;          // manual override: true => block VAD
+		this._lastMuteNoticeAt = 0;     // throttle “You’re on mute” to avoid spam
+		this._uiListeners = null; // will hold an AbortController for clean rebinds
+
 
 		
 		console.log('🕉️ Enhanced Sanskrit Tutor App initialized');
@@ -54,6 +62,9 @@ class EnhancedSanskritTutorApp {
 					  }, gracePeriod);
 					}
 			  }
+	  
+			 // this.updateMicrophoneButton();   // keep UI in sync with state
+	  
 	  }
 
 	updateUIForState(state) {
@@ -79,19 +90,33 @@ class EnhancedSanskritTutorApp {
 		  this.allowBargeInImmediate = config.allowBargeTTSPlaybackImmediate !== false; // Default true unless explicitly false
 
 		  // Initialize audio handler
-		  this.audioHandler = new AudioHandler();
-		  this.audioHandler.setConfig(config);
-		  this.audioHandler.onAudioData = (audioBlob) => {
-			  
-			  this.sendAudioToServer(audioBlob);
-			  this.setState('processing', 'audio_data', this.config.ttsGracePeriodMs); // ← ADD THIS
+		   this.audioHandler = new AudioHandler();
+		   this.audioHandler.setConfig(config);
+		   this.audioHandler.onAudioData = (audioBlob) => {  
+				this.sendAudioToServer(audioBlob);
+				this.setState('processing', 'audio_data', this.config.ttsGracePeriodMs); // ← ADD THIS
 		  };
 		  
+			
+			this._lastMuteNoticeAt ||= 0;
+
 			// Enhanced barge-in with multiple detection methods
 		  // Test ALL possible speech detection methods
 			// REPLACE the existing onSpeechValidatedCallback setup:
 		  this.audioHandler.setOnSpeechValidatedCallback(() => {
 				console.log("🎤 SPEECH VALIDATED - TTS Active:", this.ttsPlaybackActive, "Allow Barge:", this.allowBargeInImmediate);
+				
+				
+				if (this.vadMuted) {
+					const now = Date.now();
+					if (now - this._lastMuteNoticeAt > 2000) {
+					  this.showFlashMessage('You are on mute. Click “Unmute” to speak.', 'warning',1500);
+					  this._lastMuteNoticeAt = now;
+					}
+					return false; // tell VAD/pipeline to ignore this speech
+				}
+				
+				
 				
 				// ✅ ADD THIS BLOCK FIRST:
 				if (this.clientState !== 'listening' && !this.ttsPlaybackActive) 
@@ -240,37 +265,39 @@ class EnhancedSanskritTutorApp {
 		
   }
 
-  async connect() {
-		console.log('🔍 CONNECT() CALLED');
-		try {
-		  const wsUrl = this.config.websocketUrl;
-		  console.log('🔌 Connecting to WebSocket:', wsUrl);
-		  
-		  // Ensure clean state before connecting
-		  if (this.ws) {
-			this.ws.close();
-			this.ws = null;
+// 2. UPDATE connect method signature ONLY (around line 150)
+// CHANGE FROM: async connect() {
+// CHANGE TO:
+	async connect(phoneNumber, deviceInfo) {
+		  console.log('🔌 Connecting with phone:', phoneNumber);
+		  try {
+			const wsUrl = this.config.websocketUrl;
+			const params = new URLSearchParams({
+			  phone: phoneNumber,
+			  deviceInfo: JSON.stringify(deviceInfo)
+			});
+			const fullWsUrl = `${wsUrl}?${params.toString()}`;
+			
+			console.log('🔗 WebSocket URL:', fullWsUrl);
+			
+			// Ensure clean state before connecting
+			if (this.ws) {
+			  this.ws.close();
+			  this.ws = null;
+			}
+			
+			this.ws = new WebSocket(fullWsUrl);
+			this.phoneNumber = phoneNumber;
+			this.setupWebSocketHandlers();
+			
+			console.log('✅ Connection initiated');
+			this.showStatus('Connecting to Sanskrit Tutor...', 'info');
+		  } catch (error) {
+			console.error('❌ Connection failed:', error);
+			this.showError('Failed to connect to server');
+			this.scheduleReconnect();
 		  }
-		  
-		  
-		  this.ws = new WebSocket(wsUrl);
-		  this.setupWebSocketHandlers();
-		  
-		  /**await new Promise((resolve, reject) => {
-			this.ws.onopen = resolve;
-			this.ws.onerror = reject;
-			setTimeout(() => reject(new Error('Connection timeout')), 10000);
-		  });**/
-		
-		  console.log('✅ Connected successfully');
-		  this.showStatus('Connected to Sanskrit Tutor', 'success');
-		  console.log('Websocket status : ', this.isConnected);
-		} catch (error) {
-		  console.error('❌ Connection failed:', error);
-		  this.showError('Failed to connect to server');
-		  this.scheduleReconnect();
-		}
-  }
+	}
 
   setupWebSocketHandlers() {
     this.ws.onopen = () => {
@@ -337,6 +364,13 @@ class EnhancedSanskritTutorApp {
   handleWebSocketJsonMessage(data) {
 		try {
 		  switch (data.type) {
+			case 'session_created':
+			  console.log('🎉 Session created:', data.sessionId);
+			  this.userSession = { id: data.sessionId };
+			  this.showStatus(data.message, 'success');
+			  // Show voice chat interface
+			  this.showVoiceChatInterface();
+			  break;
 			case 'tts_stream_start':
 			  console.log(`📊 Received stream start:`, data.text || 'No text provided');
 			  this.startTTSStream();
@@ -467,19 +501,23 @@ class EnhancedSanskritTutorApp {
   }
 
 
-  enableUIControls() {
-    const synthesizeBtn = document.getElementById('synthesize-btn');
-    const startListeningBtn = document.getElementById('start-listening-btn');
-    
-    if (synthesizeBtn) {
-      synthesizeBtn.disabled = false;
-      synthesizeBtn.textContent = '🎵 Start TTS';
-    }
-    
-    if (startListeningBtn) {
-      startListeningBtn.disabled = false;
-    }
-  }
+enableUIControls() {
+	  const synthesizeBtn = document.getElementById('synthesize-btn');
+	  const micBtn = document.getElementById('mic-button');
+
+	  if (synthesizeBtn) {
+		synthesizeBtn.disabled = false;
+		synthesizeBtn.textContent = '🎵 Start TTS';
+	  }
+
+	  if (micBtn) {
+		micBtn.disabled = false;
+		// Reset UI to unmuted state when controls are enabled
+		this.vadMuted = false;
+		this.updateMicrophoneButton();
+	  }
+}
+
 
   // ... Rest of the methods remain the same as original app.js ...
   // (handleLLMResponse, displayUserTranscript, displayAIResponse, etc.)
@@ -492,8 +530,27 @@ class EnhancedSanskritTutorApp {
         throw new Error('Microphone permission denied');
       }
       await this.audioHandler.initialize();
+	  
+	  
+	  try {
+			const ctx = new (window.AudioContext || window.webkitAudioContext)();
+		    if (ctx.state === 'suspended') {
+				document.body.addEventListener('click', () => ctx.resume(), { once: true });
+				console.log('🔊 AudioContext suspended, will resume on first click');
+		    }
+		    const devices = await navigator.mediaDevices.enumerateDevices();
+		    console.log('🎧 Devices:', devices.map(d => `${d.kind}:${d.label||'(no label)'}`));
+          } catch (e) {
+			console.warn('Mic/context probe failed', e);
+		}
+	  
+	  
       console.log('✅ Audio initialized successfully');
       this.updateAudioStatus('ready');
+	  const devices = await navigator.mediaDevices.enumerateDevices();
+	  console.log('🎧 Devices:', devices.map(d => `${d.kind}:${d.label||'(no label)'}`));
+
+	  
     } catch (error) {
       console.error('❌ Audio initialization failed:', error);
       this.showError('Failed to initialize audio. Please check microphone permissions.');
@@ -519,18 +576,13 @@ class EnhancedSanskritTutorApp {
 
   }
 
-  handleMicrophoneToggle() {
-    try {
-      if (this.isListening) {
-        this.stopListening();
-      } else {
-        this.startListening();
-      }
-    } catch (error) {
-      console.error('❌ Microphone toggle error:', error);
-      this.showError('Failed to toggle microphone');
-    }
-  }
+handleMicrophoneToggle() {
+  app.vadMuted = !app.vadMuted;
+  app.updateMicrophoneButton();
+  app.showStatus(app.vadMuted ? 'Mic muted' : 'Mic unmuted', 'info');
+}
+
+
 
   async startListening() {
     try {
@@ -588,30 +640,41 @@ class EnhancedSanskritTutorApp {
     this.sendTextMessage({ type: 'ping' });
   }
 
-  updateMicrophoneButton(isListening) {
-    const micButton = document.getElementById('mic-button');
-    if (!micButton) return;
-    micButton.classList.toggle('listening', isListening);
-    micButton.classList.toggle('stopped', !isListening);
-    micButton.title = isListening ? 'Click to stop listening' : 'Click to start listening';
-    const icon = micButton.querySelector('i');
-    if (icon) {
-      icon.className = isListening ? 'fas fa-microphone' : 'fas fa-microphone-slash';
-    }
-  }
+updateMicrophoneButton() {
+  const btn = document.getElementById('mic-button');
+  if (!btn) return;
+  const muted = this.vadMuted;
+
+  btn.classList.toggle('muted', muted);
+  btn.classList.toggle('unmuted', !muted);
+
+  const tip = muted ? 'Unmute (allow VAD)' : 'Mute (block VAD)';
+  btn.setAttribute('aria-pressed', String(!muted));
+  btn.setAttribute('data-tip', tip);
+  btn.setAttribute('aria-label', tip);
+  btn.title = tip;
+
+  const chip = document.getElementById('mute-chip');
+  if (chip) chip.classList.toggle('hidden', !muted);
+}
+
+
+
+
   
-  showFlashMessage(message, type = 'info', duration = 3000) {
-	  const flashElement = document.getElementById('flash-message');
-	  if (flashElement) {
-		flashElement.textContent = message;
-		flashElement.className = `flash-message ${type} show`;
-		
-		// Auto-hide after duration
-		setTimeout(() => {
-		  flashElement.classList.remove('show');
-		}, duration);
-	  }
-  }
+showFlashMessage(message, type = 'info', duration = 3000) {
+  const el = document.getElementById('flash-message');
+  if (!el) return;
+  el.textContent = message;
+  // reset classes so transition can re-run
+  el.className = `flash-message ${type}`;
+  // force reflow
+  void el.offsetWidth;
+  el.classList.add('show');
+  clearTimeout(this._flashTimer);
+  this._flashTimer = setTimeout(() => el.classList.remove('show'), duration);
+}
+
 
   // Additional utility methods...
   displayUserTranscript(transcript, language) {
@@ -692,35 +755,23 @@ class EnhancedSanskritTutorApp {
   }
 
   handleErrorMessage(data) {
-    console.error('❌ Server error:', data.message);
-    this.showError(data.message);
-
-	// Stop VAD on server errors
-    this.stopListening();
-    this.updateAudioStatus('error');
-	
-	// Full state cleanup on errors
-	this.cleanupAudioState();
-	
+		console.error('❌ Server error:', data.message);
+		this.showError(data.message);
+		this.setState('listening', 'server_error');
   }
 
   handleStatusUpdateMessage(data) {
-    console.log(`ℹ️ Server Status Update: ${data.message} (Code: ${data.statusCode})`);
-    this.showStatus(data.message, data.statusType || 'info');
-    
-    this.clientState = data.statusCode === 'BUSY_SERVER' ? 'processing' : 'listening';
-    
-    if (data.statusCode === 'BUSY_SERVER') {
-      document.getElementById('voice-circle')?.style.setProperty('backgroundColor', 'orange');
-      document.getElementById('voice-status').textContent = data.message;
-    } else if (data.statusCode === 'READY') {
-      setTimeout(() => {
-        if (this.isListening) {
-          document.getElementById('voice-circle')?.style.removeProperty('backgroundColor');
-          document.getElementById('voice-status').textContent = 'Listening...';
-        }
-      }, 3000);
-    }
+		console.log(`ℹ️ Server Status Update: ${data.message} (Code: ${data.statusCode})`);
+		this.showStatus(data.message, data.statusType || 'info');
+	   if (data.statusCode === 'BUSY_SERVER') {
+		 this.setState('processing', 'server_busy', this.config?.vadEndDelayMs);
+		  document.getElementById('voice-circle')?.style.setProperty('backgroundColor', 'orange');
+		  document.getElementById('voice-status').textContent = data.message;
+	   } else if (data.statusCode === 'READY') {
+		 document.getElementById('voice-circle')?.style.removeProperty('backgroundColor');
+		 console.log('✅ READY received → setState(listening)');
+		 this.setState('listening', 'server_ready');
+		}
   }
 
   updateProcessingTime(timeMs) {
@@ -752,6 +803,54 @@ class EnhancedSanskritTutorApp {
     console.log('📤 Sending text message:', message);
     this.ws.send(JSON.stringify(message));
   }
+  
+  // 4. ADD new helper method (add anywhere in the class)
+	showVoiceChatInterface() {
+		
+		  console.log('🟢 showVoiceChatInterface() entered');
+
+		  const authContainer = document.getElementById('auth-container');
+		  const voiceChatContainer = document.getElementById('voice-chat-container');
+		  
+		  if (authContainer && voiceChatContainer) {
+			authContainer.style.display = 'none';
+			voiceChatContainer.classList.remove('hidden');
+			voiceChatContainer.style.display = 'block';
+	
+			// Start listening automatically after a short delay
+			setTimeout(() => {
+			  if (this.startListening) {
+				this.startListening();
+			  }
+			}, 500);
+		  }
+	}
+	
+	
+	// 5. ADD two more helper methods (add anywhere in the class)
+	showOTPForm(message = '') {
+		  const phoneStep = document.getElementById('phone-step');
+		  const registrationStep = document.getElementById('registration-step');  
+		  const otpStep = document.getElementById('otp-step');
+		  
+		  if (phoneStep) phoneStep.style.display = 'none';
+		  if (registrationStep) registrationStep.style.display = 'none';
+		  if (otpStep) {
+			otpStep.style.display = 'block';
+			if (message) {
+			  this.showSuccess(message);
+			}
+		  }
+	}
+
+	showRegistrationForm() {
+		  const phoneStep = document.getElementById('phone-step');
+		  const registrationStep = document.getElementById('registration-step');
+		  
+		  if (phoneStep) phoneStep.style.display = 'none';
+		  if (registrationStep) registrationStep.style.display = 'block';
+	}
+		
 
   async cleanup() {
     try {
@@ -785,6 +884,25 @@ class EnhancedSanskritTutorApp {
     console.error(`❌ App error: ${message}`);
     this.showStatus(message, 'error');
   }
+  
+  // Add this showSuccess method to your app object in app.js
+// Place it near your existing showError method
+
+	showSuccess(message) {
+		const errorDiv = document.getElementById('error-message');
+		if (errorDiv) {
+			errorDiv.textContent = message;
+			errorDiv.style.backgroundColor = '#d4edda';
+			errorDiv.style.borderColor = '#c3e6cb';
+			errorDiv.style.color = '#155724';
+			errorDiv.style.display = 'block';
+			
+			// Auto-hide success message after 3 seconds
+			setTimeout(() => {
+				errorDiv.style.display = 'none';
+			}, 3000);
+		}
+	}
 
   updateConnectionStatus(isConnected) {
     const statusElement = document.getElementById('connection-status');
@@ -828,101 +946,266 @@ class EnhancedSanskritTutorApp {
 
 let app;
 
-// Initialize app when DOM is loaded
 document.addEventListener('DOMContentLoaded', async () => {
   try {
     app = new EnhancedSanskritTutorApp();
-	
+    window.app = app;               // ✅ move here so it’s not undefined
+    window.EnhancedSanskritTutorApp = EnhancedSanskritTutorApp;
+
     await app.initialize();
-    
     setupEventListeners();
-    
   } catch (error) {
     console.error('❌ Failed to start application:', error);
   }
 });
 
-// Setup UI event listeners
+
+// 6. REPLACE setupEventListeners function COMPLETELY 
+// (This is the only major change, but it's in a separate function)
 function setupEventListeners() {
-    const connectBtn = document.getElementById('connect-btn');
-    if (connectBtn) {
-        connectBtn.addEventListener('click', async () => {
-            const name = document.getElementById('name').value.trim();
-            const apiKey = document.getElementById('apiKey').value.trim();
-            if (!name || !apiKey) {
-                app.showError('Please enter both name and API key');
+    
+	if (app._uiListeners) app._uiListeners.abort();
+	app._uiListeners = new AbortController();
+	const { signal } = app._uiListeners;
+
+	
+	// NEW: Phone number submit (step 1)
+    const phoneSubmitBtn = document.getElementById('phone-submit-btn');
+    if (phoneSubmitBtn) {
+        phoneSubmitBtn.addEventListener('click', async (e) => {
+            e.preventDefault();
+            
+            const phone = document.getElementById('phone')?.value?.trim();
+            
+            if (!phone || !phone.startsWith('+')) {
+                app.showError('Please enter a valid phone number with country code');
                 return;
             }
-            app.userName = name;
-            app.apiKey = apiKey;
-            document.getElementById('auth-status').textContent = 'Connecting...';
-            connectBtn.disabled = true;
+            
+            const btn = e.target;
+            btn.disabled = true;
+            btn.textContent = 'Checking...';
+            
             try {
-                await app.connect();
-				console.log('🔍 AFTER CONNECT: isConnected =', app.isConnected); // ADD THIS
-                showConversationSection(name);
+                const response = await fetch(`${CONFIG.getBaseURL()}/auth/check-user`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ phone })
+                });
+                
+                const result = await response.json();
+                
+				if (result.exists) {
+					  console.log('👤 Existing user found:', result.user.name);
+
+					  // 🔹 Send OTP immediately for returning users
+					  const sendBtn = e.target;
+					  sendBtn.textContent = 'Sending OTP.';
+					  try {
+							const resp = await fetch(`${CONFIG.getBaseURL()}/auth/send-otp`, {
+							  method: 'POST',
+							  headers: { 'Content-Type': 'application/json' },
+							  body: JSON.stringify({ phone })
+							});
+							const send = await resp.json();
+							if (!send.success) {
+							  app.showError(send.error || 'Failed to send OTP');
+							  return;
+							}
+							app.phoneNumber = phone;
+							app.tempUserData = null; // returning user: no profile data
+							app.showOTPForm(`Welcome back, ${result.user.name}!`);
+					    } catch (err) {
+							console.error('❌ Send OTP (existing user) error:', err);
+							app.showError('Network error. Please try again.');
+							return;
+					    } finally {
+							sendBtn.textContent = 'Continue';
+					    }
+				} 
+				else {
+				  console.log('👤 New user - showing registration');
+				  app.showRegistrationForm();
+				}
+				
             } catch (error) {
-                document.getElementById('auth-status').textContent = 'Connection failed';
-                connectBtn.disabled = false;
+                console.error('❌ Phone check error:', error);
+                app.showError('Network error. Please try again.');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Continue';
             }
         });
     }
 
-    const startListeningBtn = document.getElementById('start-listening-btn');
-    const stopListeningBtn = document.getElementById('stop-listening-btn');
-    if (startListeningBtn) {
-        startListeningBtn.addEventListener('click', async () => {
-            // Ensure audio context is ready before starting
-            if (app.batchStreamer) {
-                await app.batchStreamer.resume();
+    // NEW: Registration form submit (step 2 for new users)
+    const registrationSubmitBtn = document.getElementById('registration-submit-btn');
+    if (registrationSubmitBtn) {
+        registrationSubmitBtn.addEventListener('click', async (e) => {
+            e.preventDefault();
+            
+            const userData = {
+                name: document.getElementById('name')?.value?.trim(),
+                age: parseInt(document.getElementById('age')?.value),
+                country: document.getElementById('country')?.value,
+                nativeLanguage: document.getElementById('native-language')?.value
+            };
+            
+            if (!userData.name || !userData.age || !userData.country || !userData.nativeLanguage) {
+                app.showError('Please fill in all fields');
+                return;
             }
             
-            await app.handleMicrophoneToggle();
-            startListeningBtn.classList.add('hidden');
-            stopListeningBtn.classList.remove('hidden');
-            document.getElementById('voice-status').textContent = 'Listening...';
-        });
-    }
-    if (stopListeningBtn) {
-        stopListeningBtn.addEventListener('click', async () => {
-            await app.handleMicrophoneToggle();
-            stopListeningBtn.classList.add('hidden');
-            startListeningBtn.classList.remove('hidden');
-            document.getElementById('voice-status').textContent = 'Click "Start Listening" to begin';
-        });
-    }
-
-    const disconnectBtn = document.getElementById('disconnect-btn');
-    if (disconnectBtn) {
-        disconnectBtn.addEventListener('click', async () => {
-            console.log('🔍 DISCONNECT CLICKED'); // ADD THIS LINE HERE
-			await app.stopListening();
-            if (app.ws) {
-                app.ws.close();
-                app.ws = null;
+            const btn = e.target;
+            btn.disabled = true;
+            btn.textContent = 'Sending OTP...';
+            
+            try {
+                const response = await fetch(`${CONFIG.getBaseURL()}/auth/send-otp`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        phone: app.phoneNumber,
+                        userData 
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    app.tempUserData = userData;
+                    app.showOTPForm('OTP sent! Please check your phone.');
+                } else {
+                    app.showError(result.error || 'Failed to send OTP');
+                }
+            } catch (error) {
+                console.error('❌ Registration error:', error);
+                app.showError('Network error. Please try again.');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Send OTP';
             }
-            app.isConnected = false;
-			
-			
-			// ADD THIS BLOCK:
-			const messagesContainer = document.getElementById('messages');
-			console.log('🔍 Messages before clear:', messagesContainer?.children.length);
-			if (messagesContainer) {
-				messagesContainer.innerHTML = '';
-				console.log('🔍 Messages after clear:', messagesContainer.children.length);
-			}
-			
-            document.getElementById('conversation-section').classList.add('hidden');
-            document.getElementById('auth-section').classList.remove('hidden');
-            document.getElementById('connect-btn').disabled = false;
-            document.getElementById('auth-status').textContent = '';
         });
     }
 
-    const micButton = document.getElementById('mic-button');
-    if (micButton) {
-        micButton.addEventListener('click', () => app.handleMicrophoneToggle());
+    // NEW: OTP verification (step 3)
+    const otpSubmitBtn = document.getElementById('otp-submit-btn');
+    if (otpSubmitBtn) {
+        otpSubmitBtn.addEventListener('click', async (e) => {
+            e.preventDefault();
+            
+            const otpCode = document.getElementById('otp-code')?.value?.trim();
+            
+            if (!otpCode || otpCode.length !== 6) {
+                app.showError('Please enter a valid 6-digit OTP');
+                return;
+            }
+            
+            const btn = e.target;
+            btn.disabled = true;
+            btn.textContent = 'Verifying...';
+            
+            try {
+                const response = await fetch(`${CONFIG.getBaseURL()}/auth/verify-otp`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        phone: app.phoneNumber,
+                        otp: otpCode,
+                        userData: app.tempUserData
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    console.log('✅ OTP verified, connecting WebSocket...');
+                    
+                    await app.connect(result.sessionData.phoneNumber, result.sessionData.deviceInfo);
+                    delete app.tempUserData;
+                    
+                } else {
+                    app.showError(result.error || 'OTP verification failed');
+                }
+            } catch (error) {
+                console.error('❌ OTP verification error:', error);
+                app.showError('Network error. Please try again.');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Verify & Connect';
+            }
+        });
     }
+
+    
+	const resendBtn = document.getElementById('resend-otp-btn');
+	if (resendBtn) {
+	  resendBtn.addEventListener('click', async (e) => {
+			e.preventDefault();
+			if (!app.phoneNumber) {
+			  app.showError('Phone number missing. Go back and enter your phone.');
+			  return;
+			}
+			const btn = e.target;
+			btn.disabled = true;
+			btn.textContent = 'Resending...';
+			try {
+			  const resp = await fetch(`${CONFIG.getBaseURL()}/auth/send-otp`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				// For new users mid-signup we might have profile; for returning we won’t.
+				body: JSON.stringify({ phone: app.phoneNumber, userData: app.tempUserData || undefined })
+			  });
+			  const result = await resp.json();
+			  if (result.success) {
+				app.showStatus('OTP re-sent. Please check WhatsApp.', 'success');
+			  } else {
+				app.showError(result.error || 'Failed to resend OTP');
+			  }
+			} catch (error) {
+			  console.error('❌ Resend OTP error:', error);
+			  app.showError('Network error. Please try again.');
+			} finally {
+			  btn.disabled = false;
+			  btn.textContent = 'Resend OTP';
+			}
+	   });
+	}
+	
+	
+	// Mic toggle — use app, not this
+	document.getElementById('mic-button')?.addEventListener('click', () => app.handleMicrophoneToggle(), { signal });
+
+// Disconnect — use app everywhere
+	document.getElementById('disconnect-btn')?.addEventListener('click', async () => {
+			console.log('🔌 Disconnect clicked');
+			try { await app.stopListening(); } catch {}
+			if (app.ws) { app.ws.close(); app.ws = null; }
+			app.vadMuted = false;
+			app.isConnected = false;
+			app.userSession = null;
+			app.phoneNumber = null;
+
+			const messages = document.getElementById('messages');
+			if (messages) messages.innerHTML = '';
+
+			const auth = document.getElementById('auth-container');
+			const voice = document.getElementById('voice-chat-container');
+			if (auth && voice) {
+			  voice.style.display = 'none';
+			  auth.style.display = 'block';
+			  document.getElementById('phone-step').style.display = 'block';
+			  document.getElementById('registration-step').style.display = 'none';
+			  document.getElementById('otp-step').style.display = 'none';
+			  const phoneEl = document.getElementById('phone');
+			  const otpEl = document.getElementById('otp-code');
+			  if (phoneEl) phoneEl.value = '';
+			  if (otpEl) otpEl.value = '';
+			}
+	}, { signal });
+
+	  
+	  
     
     const textInput = document.getElementById('text-input');
     const sendButton = document.getElementById('send-button');
@@ -952,7 +1235,18 @@ function setupEventListeners() {
     if (pingButton) {
         pingButton.addEventListener('click', () => app.sendPing());
     }
+	
+	
+	
+	
+	
+	
+	
+	
+	
 }
+
+
 
 function showConversationSection(userName) {
     document.getElementById('auth-section').classList.add('hidden');

@@ -383,3 +383,44 @@ footer {
 .flash-message.info {
   background-color: #3b82f6;
 }
+
+/* Icon buttons */
+.icon-btn{
+  width:64px;height:64px;border:none;border-radius:50%;cursor:pointer;
+  display:inline-flex;align-items:center;justify-content:center;
+  box-shadow:0 6px 18px rgba(0,0,0,.15);
+  transition:transform .08s,background .2s,box-shadow .2s
+}
+.icon-btn:active{transform:scale(.96)}
+/* Normalize icon size across all buttons */
+.icon-btn .icon{width:32px;height:32px !important;}
+
+/* Mic states */
+.icon-btn.mic.unmuted{background:linear-gradient(180deg,#e8fbf0,#c8f1d8)}
+.icon-btn.mic.unmuted .mic-off{display:none!important}
+.icon-btn.mic.muted{background:linear-gradient(180deg,#f3f4f6,#e7e9ec)}
+.icon-btn.mic.muted .mic-on{display:none!important}
+.icon-btn.mic.muted .mic-off{display:block;fill:#5f6368}
+
+/* Disconnect */
+.icon-btn.hangup{background:linear-gradient(180deg,#ffd7d7,#ff9f9f)}
+.icon-btn.hangup .icon{fill:#b91c1c}
+
+/* Flash banner visibility on top of everything */
+.flash-message { z-index: 9999; pointer-events: none; }
+
+/* Controls row */
+#voice-controls.controls{display:flex;gap:16px;align-items:center;justify-content:center;margin-top:24px}
+
+/* Stack & center mic svgs so only one shows and is perfectly centered */
+#mic-button{position:relative}
+#mic-button .icon{ position:absolute; top:50%;left:50%;transform:translate(-50%,-50%);}
+
+
+/* Mute chip: make it readable */
+.mute-chip{
+  margin-top:10px;text-align:center;
+  font:600 14px/1.2 system-ui;
+  color:#374151
+}
+.hidden{display:none!important}

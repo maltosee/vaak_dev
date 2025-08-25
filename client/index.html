@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Sanskrit Tutor - Voice Conversation</title>
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="style.css?v=5">
 </head>
 <body>
     <div class="container">
@@ -14,39 +14,131 @@
         </header>
 
         <main>
-            <section id="auth-section" class="card">
-                <h2>🔐 Connect to Tutor</h2>
-                <div class="form-group">
-                    <label for="name">Your Name:</label>
-                    <input type="text" id="name" placeholder="Enter your name" required>
+            <!-- Phone-first authentication flow -->
+            <section id="auth-container" class="card">
+                <h2>🔐 Welcome to Sanskrit Tutor</h2>
+                <div id="error-message" class="error-message" style="display: none;"></div>
+                
+                <!-- Step 1: Phone number input -->
+                <div id="phone-step">
+                    <div class="form-group">
+                        <label for="phone">Mobile Number:</label>
+                        <input type="tel" id="phone" placeholder="+91XXXXXXXXXX" required>
+                        <small>Enter your phone number to continue</small>
+                    </div>
+                    <button id="phone-submit-btn" class="btn btn-primary">Continue</button>
                 </div>
-                <div class="form-group">
-                    <label for="apiKey">API Key:</label>
-                    <input type="text" id="apiKey" placeholder="Enter your API key" required>
+                
+                <!-- Step 2: Registration form (new users only) -->
+                <div id="registration-step" style="display: none;">
+                    <h3>Complete Your Profile</h3>
+                    <div class="form-group">
+                        <label for="name">Full Name:</label>
+                        <input type="text" id="name" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="age">Age:</label>
+                        <input type="number" id="age" min="13" max="100" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="country">Country:</label>
+                        <select id="country" required>
+                            <option value="">Select Country</option>
+                            <option value="India">India</option>
+                            <option value="USA">USA</option>
+                            <option value="UK">United Kingdom</option>
+                            <option value="Canada">Canada</option>
+                            <option value="Australia">Australia</option>
+                            <option value="Germany">Germany</option>
+                            <option value="France">France</option>
+                            <option value="Singapore">Singapore</option>
+                            <option value="UAE">UAE</option>
+                            <option value="Other">Other</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="native-language">Native Language:</label>
+                        <select id="native-language" required>
+                            <option value="">Select Language</option>
+                            <option value="English">English</option>
+                            <option value="Hindi">Hindi</option>
+                            <option value="Sanskrit">Sanskrit</option>
+                            <option value="Tamil">Tamil</option>
+                            <option value="Bengali">Bengali</option>
+                            <option value="Telugu">Telugu</option>
+                            <option value="Marathi">Marathi</option>
+                            <option value="Gujarati">Gujarati</option>
+                            <option value="Kannada">Kannada</option>
+                            <option value="Malayalam">Malayalam</option>
+                            <option value="Punjabi">Punjabi</option>
+                            <option value="Urdu">Urdu</option>
+                            <option value="Other">Other</option>
+                        </select>
+                    </div>
+                    <button id="registration-submit-btn" class="btn btn-success">Send OTP</button>
+                    <button id="back-to-phone" class="btn btn-secondary" onclick="showPhoneStep()">Back</button>
                 </div>
-                <button id="connect-btn" class="btn btn-primary">Connect</button>
-                <div id="auth-status" class="status"></div>
+                
+                <!-- Step 3: OTP verification -->
+                <div id="otp-step" style="display: none;">
+                    <h3>Verify Your Phone</h3>
+                    <p>We've sent a 6-digit code to your phone via WhatsApp</p>
+                    <div class="form-group">
+                        <label for="otp-code">Enter OTP Code:</label>
+                        <input type="text" id="otp-code" maxlength="6" placeholder="123456" required>
+                    </div>
+                    <button id="otp-submit-btn" class="btn btn-success">Verify & Connect</button>
+                    <button id="resend-otp-btn" class="btn btn-secondary">Resend OTP</button>
+                    <button id="back-to-phone-2" class="btn btn-secondary" onclick="showPhoneStep()">Start Over</button>
+                </div>
             </section>
 
-            <section id="conversation-section" class="card hidden">
+            <!-- Voice chat interface (hidden initially) -->
+            <section id="voice-chat-container" class="card hidden">
                 <h2>🎙️ Voice Conversation</h2>
                 
                 <div id="connection-status" class="status-bar">
-                    <span id="status-text">Disconnected</span>
+                    <span id="status-text">Connected</span>
                     <span id="user-name"></span>
                 </div>
 
                 <div id="voice-activity" class="voice-indicator">
                     <div id="voice-circle" class="voice-circle"></div>
-                    <div id="voice-status">Click "Start Listening" to begin</div>
-					<div id="flash-message" class="flash-message"></div>
+                    <div id="voice-status">Listening...</div>
+                    <div id="flash-message" class="flash-message"></div>
                 </div>
 
-                <div class="controls">
-                    <button id="start-listening-btn" class="btn btn-success">🎤 Start Listening</button>
-                    <button id="stop-listening-btn" class="btn btn-danger hidden">🛑 Stop Listening</button>
-                    <button id="disconnect-btn" class="btn btn-secondary">Disconnect</button>
-                </div>
+				
+				<div id="voice-controls" class="controls">
+					  <!-- Mic toggle -->
+					  <button id="mic-button"
+							  class="icon-btn mic unmuted"
+							  aria-pressed="false"
+							  aria-label="Mute (block VAD)"
+							  title="Mute (block VAD)">
+						<!-- Mic (unmuted) -->
+						<svg class="icon mic-on" viewBox="0 0 24 24" width="28" height="28" aria-hidden="true">
+						  <path d="M12 14a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v5a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21H9v2h6v-2h-2v-3.08A7 7 0 0 0 19 11h-2z"/>
+						</svg>
+						<!-- Mic-slash (muted) -->
+						<svg class="icon mic-off" viewBox="0 0 24 24" width="28" height="28" aria-hidden="true">
+						  <path d="M2 2l20 20-1.41 1.41L17.3 20.12A6.97 6.97 0 0 1 12 21a7 7 0 0 1-7-7h2a5 5 0 0 0 8.5 3.54l-1.5-1.5A3 3 0 0 1 9 11V6a3 3 0 0 1 5.65-1.18l-1.6 1.6A1 1 0 0 0 12 6a1 1 0 0 0-1 1v4.59L2 2zM19 11h2a7 7 0 0 1-1.66 4.53l-1.42-1.42A5 5 0 0 0 19 11z"/>
+						</svg>
+					  </button>
+
+					  <!-- Disconnect -->
+					  <button id="disconnect-btn"
+							  class="icon-btn hangup"
+							  aria-label="Disconnect"
+							  title="Disconnect">
+						<svg class="icon" viewBox="0 0 24 24" width="28" height="28" aria-hidden="true">
+						  <path d="M6.62 10.79a15.053 15.053 0 0 0 6.59 6.59l2.2-2.2a1 1 0 0 1 1.01-.24c1.11.37 2.3.57 3.58.57a1 1 0 0 1 1 1V20a1 1 0 0 1-1 1C11.85 21 3 12.15 3 1a1 1 0 0 1 1-1h3.49a1 1 0 0 1 1 1c0 1.28.2 2.47.57 3.58a1 1 0 0 1-.24 1.01l-2.2 2.2z"/>
+						</svg>
+					  </button>
+				</div>
+
+				<!-- Small status chip -->
+				<div id="mute-chip" class="mute-chip hidden">VAD muted</div>
 
                 <div id="conversation-display" class="conversation">
                     <div class="conversation-header">Conversation History</div>
@@ -67,11 +159,23 @@
         </footer>
     </div>
 
-	<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.14.0/dist/ort.js"></script>
-	<script src="https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.22/dist/bundle.min.js"></script>
-	<script type="module" src="config.js"></script>
-	<script type="module" src="audio_handler.js"></script>
-	<script type="module" src="app.js?v=1.2.4"></script>
-	
+    <script>
+        // Helper function to show phone step
+        function showPhoneStep() {
+            document.getElementById('phone-step').style.display = 'block';
+            document.getElementById('registration-step').style.display = 'none';
+            document.getElementById('otp-step').style.display = 'none';
+            
+            // Clear fields
+            document.getElementById('phone').value = '';
+            document.getElementById('otp-code').value = '';
+        }
+    </script>
+
+    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.14.0/dist/ort.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.22/dist/bundle.min.js"></script>
+    <script type="module" src="config.js"></script>
+    <script type="module" src="audio_handler.js"></script>
+    <script type="module" src="app.js?v=2.0.1"></script>
 </body>
 </html>
